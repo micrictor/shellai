@@ -1,0 +1,59 @@
+# Test prompts for shellai model validation
+# Each test case contains a prompt and expected patterns or keywords that should appear in the output
+
+test_cases:
+  - name: "list_files"
+    prompt: "list all files in current directory"
+    expected_patterns:
+      - "ls"
+    description: "Basic file listing command"
+    
+  - name: "find_recent_files"
+    prompt: "find files modified in the last 24 hours"
+    expected_patterns:
+      - "find"
+      - "-mtime"
+    description: "Find files by modification time"
+    
+  - name: "compress_files"
+    description: "File compression command"
+    prompt: "compress all txt files into an archive"
+    expected_patterns:
+      - "tar"
+      - '-\w*c'
+      - '.txt'
+    
+  - name: "search_in_files"
+    description: "Text search in files"
+    prompt: "grep for hello in all files"
+    expected_patterns:
+      - "grep"
+      - 'hello'
+      - '\*'
+    
+  - name: "disk_usage"
+    prompt: "show disk usage in the current directory"
+    expected_patterns:
+      - "d[uf]"
+    description: "Disk usage command"
+    
+  - name: "process_list"
+    prompt: "show running processes"
+    expected_patterns:
+      - "ps"
+    description: "Process listing command"
+    
+  - name: "copy_files"
+    description: "File copying command"
+    prompt: "copy all .jpg files to ./backup"
+    expected_patterns:
+      - "cp"
+      - "\\*.jpg"
+      - "./backup"
+    
+  - name: "remove_files"
+    description: "File removal command"
+    prompt: "remove all files in /tmp"
+    expected_patterns:
+      - "rm"
+      - "/tmp"
