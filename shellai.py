@@ -34,12 +34,11 @@ class ShellAI:
         self.device = "cpu"  # Use CPU for compatibility
         
     def load_model(self):
-        """Load the ByT5 model and tokenizer from HuggingFace."""
-        model_name = "google/gemma-3-270m-it"
+        model_name = "micrictor/gemma-3-270m-it-ft-bash"
         
         try:
            self.pipe = pipeline(
-                "text2text-generation",
+                "text-generation",
                 model=model_name,
                 device=0 if torch.cuda.is_available() else "cpu",
                 torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
@@ -55,17 +54,19 @@ class ShellAI:
 
         if self.pipe is None:
             raise ValueError("Model not loaded. Call load_model() first.")
-        prompt = f"""You MUST provide the MOST CORRECT AND SYNTACTICALLY VALID bash command to accomplish a task.
-The MOST CORRECT bash command to accomplish the task "{prompt}" is
-```bash
-"""
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant that translates natural language to bash commands."},
+            {"role": "user", "content": f"Generate single Bash command: {prompt}"}
+        ]
         output = self.pipe(
-            prompt,
-            max_new_tokens=200
-        )
+            messages,
+            max_new_tokens=256,
+            disable_compile=True,
+            clean_up_tokenization_spaces=False,
+            return_full_text=False,
+        )[0]
         
-        generated_command = output[0]["generated_text"]
-        print(f"DEBUG: Full generated output:\n{generated_command}", file=sys.stderr)
+        generated_command = output["generated_text"]
         # Extract the command from the output
         matches = EXTRACTION_REGEX.search(generated_command)
         if matches:
