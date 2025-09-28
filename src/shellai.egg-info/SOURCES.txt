@@ -2,7 +2,9 @@ README.md
 pyproject.toml
 setup.py
 src/shellai/__init__.py
+src/shellai/__main__.py
 src/shellai/shellai.py
+src/shellai/tty.py
 src/shellai.egg-info/PKG-INFO
 src/shellai.egg-info/SOURCES.txt
 src/shellai.egg-info/dependency_links.txt

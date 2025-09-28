@@ -17,12 +17,12 @@ def read_requirements(filename):
         return [line.strip() for line in f if line.strip() and not line.startswith('#')]
 
 install_requires = [
-    'torch>=1.9.0',
+    'torch>=2.8.0',
     'transformers>=4.20.0',
-    'psutil>=5.8.0',
+    'psutil>=7.1.0',
 ]
 
-test_requires = read_requirements('requirements-test.txt')
+test_requires = read_requirements('requirements.txt')
 
 setup(
     name='shellai',
@@ -53,7 +53,6 @@ setup(
     python_requires='>=3.8',
     install_requires=install_requires,
     extras_require={
-        'test': test_requires,
         'dev': [
             'black',
             'flake8',
