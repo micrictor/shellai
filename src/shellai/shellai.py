@@ -9,17 +9,16 @@ descriptions into shell commands.
 import argparse
 import os
 import sys
+import threading
 import re
 import warnings
 
-
-"""
-https://huggingface.co/blog/gemma-peft
-"""
+from shellai.tty import TTYWriter
 
 # Suppress warnings for cleaner output
 warnings.filterwarnings("ignore")
 os.environ['TRANSFORMERS_VERBOSITY'] = 'critical'
+os.environ["TOKENIZERS_PARALLELISM"] = "true" 
 EXTRACTION_REGEX = re.compile(r'```bash(.*?)```', re.DOTALL | re.IGNORECASE | re.MULTILINE)
 
 import torch
@@ -72,7 +71,7 @@ class ShellAI:
         if matches:
             return matches.group(1).strip()
 
-        return generated_command.strip()
+        return generated_command.strip().replace('“','"').replace('”','"')
 
 
 def main():
@@ -121,13 +120,29 @@ Examples:
     
     # Initialize and run the AI
     ai = ShellAI()
+    # Start a background thread to print a turtle emoji every second while the model loads
+    stop_event = threading.Event()
+    def print_turtle():
+        import time
+        turt_count = 1
+        while not stop_event.is_set():
+            print(("🐢" * turt_count) + "\r", end="", flush=True)
+            turt_count += 1
+            time.sleep(1)
+        print("\r", end='', flush=True)
+    t = threading.Thread(target=print_turtle)
+    t.start()
     ai.load_model()
-    
+    stop_event.set()
+    t.join()
+
     try:
         command = ai.generate_command(prompt)
-        # Output the generated command to stdout
-        print(command)
-        
+        while command is None or command == "":
+            command = ai.generate_command(prompt)
+        with TTYWriter() as tty:
+            tty.write(command)
+
     except Exception as e:
         print(f"Error generating command: {e}", file=sys.stderr)
         sys.exit(1)

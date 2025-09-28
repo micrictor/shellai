@@ -1,0 +1,12 @@
+README.md
+pyproject.toml
+setup.py
+src/shellai/__init__.py
+src/shellai/shellai.py
+src/shellai.egg-info/PKG-INFO
+src/shellai.egg-info/SOURCES.txt
+src/shellai.egg-info/dependency_links.txt
+src/shellai.egg-info/entry_points.txt
+src/shellai.egg-info/requires.txt
+src/shellai.egg-info/top_level.txt
+tests/test_shellai.py

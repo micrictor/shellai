@@ -16,7 +16,7 @@ from unittest.mock import patch, MagicMock
 # Add the parent directory to the path to import shellai
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from shellai import ShellAI
+from src.shellai.shellai import ShellAI
 
 def load_test_cases(test_data_file):
     """Load test cases from the YAML file."""

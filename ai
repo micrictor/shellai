@@ -5,4 +5,4 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Run the Python script with all arguments
-"$SCRIPT_DIR/.venv/bin/python" "$SCRIPT_DIR/shellai.py" "$@"
+"$SCRIPT_DIR/.venv/bin/python3" "-m" "shellai" "$@"

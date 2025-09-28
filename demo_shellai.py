@@ -1,4 +1,4 @@
-from shellai import ShellAI
+from src.shellai.shellai import ShellAI
 
 m = ShellAI()
 m.load_model()
