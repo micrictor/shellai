@@ -133,13 +133,13 @@ Examples:
     t = threading.Thread(target=print_turtle)
     t.start()
     ai.load_model()
-    stop_event.set()
-    t.join()
 
     try:
         command = ai.generate_command(prompt)
         while command is None or command == "":
             command = ai.generate_command(prompt)
+        stop_event.set()
+        t.join()
         with TTYWriter() as tty:
             tty.write(command)
 
