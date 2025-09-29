@@ -1,14 +1,12 @@
 import os
-import time
 
 from shellai.tty.base import BaseTTYWriter
-
-SUPPORTED_SHELLS = {'bash'}
 
 
 file_directory = os.path.dirname(os.path.abspath(__file__))
 with open(os.path.join(file_directory, "bash_frida.js"), "r") as f:
     _FRIDA_SCRIPT = f.read()
+
 
 class BashTTYWriter(BaseTTYWriter):
     """Class to handle writing an arbitrary string to the TTY of the parent shell process."""
