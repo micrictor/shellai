@@ -47,14 +47,21 @@ class BaseTTYWriter():
 
     def write(self, data):
         """Write data to the parent shell's TTY."""
-        # Fork the process
-        pid = os.fork()
-        if pid == 0:
-            # Child process
-            self._write_to_tty(data)
-        else:
+        # Fork the process using double fork so the parent can exit immediately
+        pid_1 = os.fork()
+        if pid_1 > 0:
             # Parent process
             os._exit(0)  # Exit parent immediately
+        
+        pid_2 = os.fork()
+        if pid_2 > 0:
+            # First child process
+            os._exit(0)  # Exit first child immediately
+
+        # Second child, now orphaned, runs the writer
+        self._write_to_tty(data)
+        os._exit(0)  # Exit after writing
+        
 
 
     def close(self):

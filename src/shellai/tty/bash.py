@@ -1,8 +1,14 @@
-import subprocess
+import os
+import time
 
-from .base import BaseTTYWriter
+from shellai.tty.base import BaseTTYWriter
 
 SUPPORTED_SHELLS = {'bash'}
+
+
+file_directory = os.path.dirname(os.path.abspath(__file__))
+with open(os.path.join(file_directory, "bash_frida.js"), "r") as f:
+    _FRIDA_SCRIPT = f.read()
 
 class BashTTYWriter(BaseTTYWriter):
     """Class to handle writing an arbitrary string to the TTY of the parent shell process."""
@@ -12,19 +18,28 @@ class BashTTYWriter(BaseTTYWriter):
     
     def _write_to_tty(self, data):
         """
-        Use gdb to call readline functions in the parent shell process
-        This is an incredible hack, but it works!
+        Write the given data to the TTY of the parent shell process.
         """
-        data = data.replace('"', r'\"').replace('\\', r'\\')
-        run = subprocess.run([
-            'gdb', '--batch',
-            '-p', str(self.parent_shell_pid),
-            '-ex', f'call (int)rl_replace_line("{data}", 0)',
-            '-ex', f'call (int)rl_forward_byte({len(data)}, 0)',
-            '-ex', 'call (void)rl_redisplay()',
-            '-ex', 'detach',
-            '-ex', 'quit'],
-            capture_output=True)
+        # Import frida here so it can find its shared libraries.
+        # Required because this method is called in a forked process.
+        import frida
+        session = frida.attach(int(self.parent_shell_pid))
+
+        # If anything fails after we attach, we need to detach or the user's shell freezes
+        try:
+            script = session.create_script(_FRIDA_SCRIPT)
+            script.load()
+            api = script.exports
+            api.write_to_tty(data)
+        except Exception as e:
+            print(f"Error while writing back to shell: {e}", flush=True)
+        finally:
+            session.detach()
         
-        if run.returncode != 0:
-            raise RuntimeError(f"Readline write command failed with return code {run.returncode}. Stderr: {run.stderr}")
+        
+
+if __name__ == "__main__":
+    writer = BashTTYWriter()
+    writer.open()
+    writer.write("echo 'Hello from ShellAI!'")
+    writer.close()
