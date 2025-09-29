@@ -1,7 +1,9 @@
 from .bash import BashTTYWriter
+from .zsh import ZshTTYWriter
 
 WRITERS = {
     BashTTYWriter,
+    ZshTTYWriter
 }
 
 SUPPORTED_SHELLS = {writer.SHELL_NAME: writer for writer in WRITERS}
