@@ -1,7 +1,6 @@
 var rl_replace_line = null;
 var rl_forward_byte = null;
 var rl_redisplay    = null;
-var xmalloc          = null;
 
 try {
     Process.getModuleByName("bash").enumerateExports().forEach(function(exp) {
@@ -14,9 +13,6 @@ try {
                 break;
             case 'rl_redisplay':
                 rl_redisplay = new NativeFunction(exp.address, 'void', []);
-                break;
-            case 'xmalloc':
-                xmalloc = new NativeFunction(exp.address, 'pointer', ['int']);
                 break;
             default:
                 break;
