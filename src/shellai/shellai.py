@@ -13,7 +13,7 @@ import threading
 import re
 import warnings
 
-from shellai.tty import TTYWriter
+from shellai.tty import GenericTTYWriter
 
 # Suppress warnings for cleaner output
 warnings.filterwarnings("ignore")
@@ -140,8 +140,8 @@ Examples:
             command = ai.generate_command(prompt)
         stop_event.set()
         t.join()
-        with TTYWriter() as tty:
-            tty.write(command)
+        with GenericTTYWriter() as tty_writer:
+            tty_writer.write(command)
 
     except Exception as e:
         print(f"Error generating command: {e}", file=sys.stderr)
