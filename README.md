@@ -13,6 +13,7 @@ TODO:
 
 * zsh support
 * run daemon with model pre-loaded in memory. Should save like 80% of runtime
+* with daemon, build vector search of local manpages
 * train "hackerai" with https://github.com/CoolHandSquid/TireFire/blob/TireFire_V4/WeeklyUpdateFiles/23-04-13_21%3A09%3A32.csv
 
 
