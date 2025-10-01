@@ -1,3 +1,4 @@
 [console_scripts]
 ai = shellai:main
+ai, = shellai:main
 shellai = shellai:main

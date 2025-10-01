@@ -4,11 +4,14 @@ setup.py
 src/shellai/__init__.py
 src/shellai/__main__.py
 src/shellai/shellai.py
-src/shellai/tty.py
 src/shellai.egg-info/PKG-INFO
 src/shellai.egg-info/SOURCES.txt
 src/shellai.egg-info/dependency_links.txt
 src/shellai.egg-info/entry_points.txt
 src/shellai.egg-info/requires.txt
 src/shellai.egg-info/top_level.txt
+src/shellai/tty/__init__.py
+src/shellai/tty/base.py
+src/shellai/tty/bash.py
+src/shellai/tty/zsh.py
 tests/test_shellai.py

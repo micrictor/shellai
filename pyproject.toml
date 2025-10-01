@@ -32,6 +32,9 @@ keywords = ["ai", "shell", "command-line", "automation", "llm"]
 dependencies = [
     "torch>=1.9.0",
     "transformers>=4.20.0",
+    "dotenv>=0.9",
+    "frida>=17.3.2",
+    "psutil>=7.1.0"
 ]
 
 [project.optional-dependencies]
@@ -57,6 +60,7 @@ Issues = "https://github.com/micrictor/shellai/issues"
 [project.scripts]
 shellai = "shellai:main"
 ai = "shellai:main"
+"ai," = "shellai:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
