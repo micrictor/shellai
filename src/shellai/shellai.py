@@ -73,6 +73,13 @@ class ShellAI:
 
         return generated_command.strip().replace('“','"').replace('”','"')
 
+def command_exists(command_string: str) -> bool:
+    """Check if a command exists in the system PATH."""
+    command = command_string.split()[0]
+    return any(
+        os.access(os.path.join(path, command), os.X_OK)
+        for path in os.environ["PATH"].split(os.pathsep)
+    )
 
 def main():
     """Main entry point for the shellai tool."""
@@ -136,7 +143,7 @@ Examples:
 
     try:
         command = ai.generate_command(prompt)
-        while command is None or command == "":
+        while command is None or command == "" or not command_exists(command):
             command = ai.generate_command(prompt)
         stop_event.set()
         t.join()
