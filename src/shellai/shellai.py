@@ -7,7 +7,9 @@ descriptions into shell commands.
 """
 
 import argparse
+import multiprocessing
 import os
+import subprocess
 import sys
 import threading
 import re
@@ -76,10 +78,15 @@ class ShellAI:
 def command_exists(command_string: str) -> bool:
     """Check if a command exists in the system PATH."""
     command = command_string.split()[0]
-    return any(
+    is_on_path = any(
         os.access(os.path.join(path, command), os.X_OK)
         for path in os.environ["PATH"].split(os.pathsep)
     )
+    if is_on_path:
+        return True
+    # Check for built-ins/functions
+    cmd = subprocess.run(["bash", "-c", f"type {command}"], capture_output=True, text=True)
+    return cmd.returncode == 0
 
 def main():
     """Main entry point for the shellai tool."""
@@ -142,18 +149,25 @@ Examples:
     ai.load_model()
 
     try:
-        command = ai.generate_command(prompt)
-        while command is None or command == "" or not command_exists(command):
-            command = ai.generate_command(prompt)
-        stop_event.set()
-        t.join()
         with GenericTTYWriter() as tty_writer:
-            tty_writer.write(command)
+            command = ai.generate_command(prompt)
+            command = "whoaasdasdmi"
+            while command is None or command == "" or not tty_writer.check_command(command):
+                command = ai.generate_command(prompt)
+
+            multiprocessing.set_start_method('spawn')
+            p = multiprocessing.Process(target=child_process, args=(tty_writer, command))
+            p.start()
+            stop_event.set()
+            t.join()
+            os._exit(0)
 
     except Exception as e:
-        print(f"Error generating command: {e}", file=sys.stderr)
+        print(f"Error generating command: {e.with_traceback()}", file=sys.stderr)
         sys.exit(1)
 
+def child_process(tty_writer, command):
+    tty_writer.static_write_to_tty(tty_writer.parent_shell_pid, command)
 
 if __name__ == "__main__":
     main()

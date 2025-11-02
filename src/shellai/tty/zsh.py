@@ -1,13 +1,13 @@
 import os
 
-from shellai.tty.base import BaseTTYWriter
+from shellai.tty.base import BaseTTY
 
 
 file_directory = os.path.dirname(os.path.abspath(__file__))
 with open(os.path.join(file_directory, "zsh_frida.js"), "r") as f:
     _FRIDA_SCRIPT = f.read()
 
-class ZshTTYWriter(BaseTTYWriter):
+class ZshTTYWriter(BaseTTY):
     """Class to handle writing an arbitrary string to the TTY of the parent shell process."""
     SHELL_NAME = 'zsh'
     def __init__(self):

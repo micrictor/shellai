@@ -1,8 +1,8 @@
-from .bash import BashTTYWriter
+from .bash import BashTTY
 from .zsh import ZshTTYWriter
 
 WRITERS = {
-    BashTTYWriter,
+    BashTTY,
     ZshTTYWriter
 }
 

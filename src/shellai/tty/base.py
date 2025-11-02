@@ -2,10 +2,50 @@ from abc import abstractmethod
 import os
 import psutil
 
-class BaseTTYWriter():
+class CommandChecker:
+    """Class to provide command existence checking functionality."""
+    def __init__(self, parent_shell_pid, frida_script):
+        self.parent_shell_pid = parent_shell_pid
+        self.frida_script = frida_script
+
+        # Import frida here so it can find its shared libraries.
+        import frida
+        self.session = frida.attach(int(self.parent_shell_pid))
+        self.script = self.session.create_script(self.frida_script)
+        self.script.load()
+        self.api = self.script.exports
+
+    def __getstate__(self):
+        """We don't actually need to pickle this class."""
+        return {}
+    
+    def __setstate__(self, state):
+        """We don't actually need to pickle this class."""
+        pass
+
+    def check_command(self, command_string: str) -> bool:
+        """
+        Check if a command exists in the system PATH.
+        
+        If not implemented, return True by default.
+        """
+        result = False
+        cmd = command_string.split()[0]
+        print(f"Checking command existence: {cmd}", flush=True)
+        try:
+            result = self.api.check_command(cmd)
+        except Exception as e:
+            print(f"Error while checking command: {e}", flush=True)
+        print(result, flush=True)
+        return result
+
+class BaseTTY():
     """Class to handle writing an arbitrary string to the TTY of the parent shell process."""
 
     SHELL_NAME: str
+    _cmd_checker: 'CommandChecker' = None
+    _cmd_checker_cls: 'type[CommandChecker]' = CommandChecker
+    _frida_script: str = ""
 
     def __init__(self):
         self.tty_fd = None
@@ -61,8 +101,6 @@ class BaseTTYWriter():
         # Second child, now orphaned, runs the writer
         self._write_to_tty(data)
         os._exit(0)  # Exit after writing
-        
-
 
     def close(self):
         """Close the TTY file descriptor."""
@@ -70,6 +108,15 @@ class BaseTTYWriter():
             os.close(self.tty_fd)
             self.tty_fd = None
         self.tty_path = None
+
+    @property
+    def cmd_checker(self) -> 'CommandChecker':
+        if self._cmd_checker is None:
+            self._cmd_checker = self._cmd_checker_cls(self.parent_shell_pid, self._frida_script)
+        return self._cmd_checker
+
+    def check_command(self, command_string: str) -> bool:
+       return self.cmd_checker.check_command(command_string)
 
     def __enter__(self):
         """Context manager entry."""
