@@ -21,13 +21,21 @@ try {
             case 'describe_command':
                 describe_command = new NativeFunction(exp.address, 'int', ['pointer', 'int']);
                 break;
-            case 'printf_chk@plt':
-                write = new NativeFunction(exp.address, 'int', ['int', 'pointer']);
-                break;
             default:
                 break;
         }
     });
+
+    // If Bash wasn't statically compiled, we also need to go hunting for the readline funcs in libreadline
+    if (!([rl_redisplay, rl_forward_byte, rl_replace_line].every(x => x !== null))) {
+        Process.enumerateModules().forEach(function(module) {
+            if (module.name.startsWith("libreadline")) {
+                rl_replace_line = new NativeFunction(module.getExportByName("rl_replace_line"), 'int', ['pointer', 'int']);
+                rl_forward_byte = new NativeFunction(module.getExportByName("rl_forward_byte"), 'int', ['int', 'int']);
+                rl_redisplay = new NativeFunction(module.getExportByName("rl_redisplay"), 'void', []);
+            }
+        });
+    }
 } catch (e) {
     console.log("Frida error: " + e.stack);
 }

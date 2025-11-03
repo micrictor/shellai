@@ -27,6 +27,9 @@ Requires-Python: >=3.8
 Description-Content-Type: text/markdown
 Requires-Dist: torch>=1.9.0
 Requires-Dist: transformers>=4.20.0
+Requires-Dist: dotenv>=0.9
+Requires-Dist: frida>=17.3.2
+Requires-Dist: psutil>=7.1.0
 Provides-Extra: test
 Requires-Dist: pytest>=7.0.0; extra == "test"
 Requires-Dist: pyyaml>=6.0; extra == "test"
