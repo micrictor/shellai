@@ -29,18 +29,17 @@ from transformers import pipeline
 class ShellAI:
     """Main class for the ShellAI tool."""
     
-    def __init__(self):
+    def __init__(self, model_name):
+        self.model_name = model_name
         self.model = None
         self.tokenizer = None
         self.device = "cpu"  # Use CPU for compatibility
         
     def load_model(self):
-        model_name = "micrictor/gemma-3-270m-it-ft-bash"
-        
         try:
            self.pipe = pipeline(
                 "text-generation",
-                model=model_name,
+                model=self.model_name,
                 device=0 if torch.cuda.is_available() else "cpu",
                 torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
             )
@@ -111,7 +110,12 @@ Examples:
     parser.add_argument(
         "--version",
         action="version",
-        version="shellaipad_token_id 0.1.0"
+        version="shellai 0.1.0"
+    )
+
+    parser.add_argument(
+        "--model",
+        default="micrictor/gemma-3-270m-it-ft-bash"
     )
     
     parser.add_argument(
@@ -133,7 +137,7 @@ Examples:
         print(f"Input prompt: {prompt}", file=sys.stderr)
     
     # Initialize and run the AI
-    ai = ShellAI()
+    ai = ShellAI(model_name=args.model)
     # Start a background thread to print a turtle emoji every second while the model loads
     stop_event = threading.Event()
     def print_turtle():

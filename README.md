@@ -22,3 +22,41 @@ Running notes:
 * GDB abomination. Gemini/ChatGPT both initially told me "can't be done, you need something like tmux send-keys." After bringing up process injection, they insisted "nope, impossible"
 * First thought was just "write to the tty device for parent terminal", but while that shows up it's not runnable in the terminal. TIOCSTI requires permissions (could be done w/ setuid/capabilities) and isn't enabled by default on macos.
 * YOLO, use frida
+
+
+## Model tests
+
+Looking for some variant on "grep all the files for 'root'"
+
+### Untrained
+
+```bash
+(.venv) [mtu@archlap shellai]$ time ai, --model google/gemma-3-270m-it list every file in /etc that contains the string "root"
+Using model google/gemma-3-270m-it
+🐢🐢🐢🐢🐢🐢🐢🐢
+real	0m11.176s
+user	0m12.742s
+sys	0m1.086s
+(.venv) [mtu@archlap shellai]$ ls -l /etc^C
+(.venv) [mtu@archlap shellai]$ time ai, --model google/gemma-3-270m-it list every file in /etc that contains the string "root"
+Using model google/gemma-3-270m-it
+🐢🐢🐢
+real	0m5.206s
+user	0m12.841s
+sys	0m1.010s
+(.venv) [mtu@archlap shellai]$ ls /etc/passwd
+```
+
+### Trained
+
+```bash
+(.venv) [mtu@archlap shellai]$ time ai, list every file in /etc that contains the string "root"
+Using model micrictor/gemma-3-270m-it-ft-bash
+🐢🐢🐢🐢🐢🐢🐢🐢
+real	0m10.549s
+user	0m19.052s
+sys	0m1.059s
+(.venv) [mtu@archlap shellai]$ find /etc -type f -exec grep -l root '{}' \;
+```
+
+
