@@ -1,4 +1,5 @@
 from abc import abstractmethod
+import multiprocessing
 import os
 import psutil
 
@@ -31,12 +32,10 @@ class CommandChecker:
         """
         result = False
         cmd = command_string.split()[0]
-        print(f"Checking command existence: {cmd}", flush=True)
         try:
             result = self.api.check_command(cmd)
         except Exception as e:
-            print(f"Error while checking command: {e}", flush=True)
-        print(result, flush=True)
+            return True  # Fail open on error
         return result
 
 class BaseTTY():
@@ -48,8 +47,6 @@ class BaseTTY():
     _frida_script: str = ""
 
     def __init__(self):
-        self.tty_fd = None
-        self.tty_path = None
         self.parent_shell_pid = None
 
     def open(self):

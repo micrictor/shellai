@@ -15,7 +15,7 @@ import threading
 import re
 import warnings
 
-from shellai.tty import GenericTTYWriter
+from shellai.tty import GenericTTYWriter, write_to_tty
 
 # Suppress warnings for cleaner output
 warnings.filterwarnings("ignore")
@@ -151,23 +151,20 @@ Examples:
     try:
         with GenericTTYWriter() as tty_writer:
             command = ai.generate_command(prompt)
-            command = "whoaasdasdmi"
             while command is None or command == "" or not tty_writer.check_command(command):
                 command = ai.generate_command(prompt)
 
             multiprocessing.set_start_method('spawn')
-            p = multiprocessing.Process(target=child_process, args=(tty_writer, command))
+            p = multiprocessing.Process(target=write_to_tty, args=(tty_writer._frida_script, tty_writer.parent_shell_pid, command))
             p.start()
             stop_event.set()
             t.join()
             os._exit(0)
 
     except Exception as e:
-        print(f"Error generating command: {e.with_traceback()}", file=sys.stderr)
+        print(f"Error generating command: {e}", file=sys.stderr)
         sys.exit(1)
 
-def child_process(tty_writer, command):
-    tty_writer.static_write_to_tty(tty_writer.parent_shell_pid, command)
 
 if __name__ == "__main__":
     main()
