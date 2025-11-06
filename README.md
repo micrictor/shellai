@@ -1,5 +1,7 @@
 ## Shellai
 
+[Blog post](https://short.sectorr.dev/shellai-blog)
+
 Shellai (pronounced shellay) is a command-line interface for getting AI assistance without network calls or a separate interface.
 It's built around the idea that I should be able to, in my terminal, simply type `ai, do this thing` and have it generate the command for me.
 
