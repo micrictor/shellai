@@ -13,7 +13,7 @@ Shellai uses local small-language models (SLMs) to fulfill user requests. Your d
 1.  `ptrace` must be allowed for all processes owned by the same user. This can be set temporarily (until next reboot) using `echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope`.
     *   Setting this can be bad, since it allows any process running as a user to access memory/internal state of all other processes for that user.
 2.  `hf login` to set up your HuggingFace credentials for use to download the model.
-3.  In HuggingFace, accept the [Gemma license](https://huggingface.co/google/gemma-3-270m-it) and request access to [my finetuned model, which is the default for the tool](https://huggingface.co/micrictor/gemma-3-270m-it-ft-bash). This is optional if you want to use other models.
+3.  In HuggingFace, accept the [Gemma license](https://huggingface.co/google/gemma-3-270m-it) and request access to [my finetuned model, which is the default for the tool](https://huggingface.co/micrictor/gemma-3-270m-it-ft-bash). This is optional if you want to use other models - sorry for the added friction, but the Gemma3 license/TOS is hard to understand so I don't know if I can have it "public".
 4.  Run your first prompt, like `ai, show me the last 10 lines of the readme`
 
 ## Model tests
