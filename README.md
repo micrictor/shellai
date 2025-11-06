@@ -3,27 +3,16 @@
 Shellai (pronounced shellay) is a command-line interface for getting AI assistance without network calls or a separate interface.
 It's built around the idea that I should be able to, in my terminal, simply type `ai, do this thing` and have it generate the command for me.
 
-The name is inspired by a turtle I tripped over on a run on 21 September 2025. That morning, my house had a power outage, so I couldn't get AI assistance to try some file combinations for a firmware analysis I was doing.
+Shellai uses local small-language models (SLMs) to fulfill user requests. Your data stays on your machine. Unlike other tools like `shellgpt`, the local inference is built into this tool - no need to turn up an ollama server seperatly.
 
-I called it "Shellay" (think: Forrest Gump), which free-flow associated to shell AI, and from there to how existing tools like Goose and Gemini CLI were often overkill and certainly not resilient to things like power outages that kill local wired and cellular internet.
+## Install steps
 
-Shellai uses local small-language models (SLMs) by default. Your data stays on your machine. Unlike other tools like `shellgpt`, the local inference is built into this tool - no need to turn up an ollama server seperatly.
-
-TODO:
-
-* add "remoteai," that calls a configured remote LLM interface
-* run daemon with model pre-loaded in memory. Should save like 80% of runtime
-* with daemon, build vector search of local manpages
-* train "hackerai" with https://github.com/CoolHandSquid/TireFire/blob/TireFire_V4/WeeklyUpdateFiles/23-04-13_21%3A09%3A32.csv
-
-
-Running notes:
-
-* Fine-tuning Gemma 270M only took like 4 hours on a desktop 4070. Advantages of very small models, I guess.
-* GDB abomination. Gemini/ChatGPT both initially told me "can't be done, you need something like tmux send-keys." After bringing up process injection, they insisted "nope, impossible"
-* First thought was just "write to the tty device for parent terminal", but while that shows up it's not runnable in the terminal. TIOCSTI requires permissions (could be done w/ setuid/capabilities) and isn't enabled by default on macos.
-* YOLO, use frida
-
+1. `git clone https://github.com/micrictor/shellai.git && cd shellai && pip install -e .` 
+1.  `ptrace` must be allowed for all processes owned by the same user. This can be set temporarily (until next reboot) using `echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope`.
+    *   Setting this can be bad, since it allows any process running as a user to access memory/internal state of all other processes for that user.
+2.  `hf login` to set up your HuggingFace credentials for use to download the model.
+3.  In HuggingFace, accept the [Gemma license](https://huggingface.co/google/gemma-3-270m-it) and request access to [my finetuned model, which is the default for the tool](https://huggingface.co/micrictor/gemma-3-270m-it-ft-bash). This is optional if you want to use other models.
+4.  Run your first prompt, like `ai, show me the last 10 lines of the readme`
 
 ## Model tests
 

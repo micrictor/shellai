@@ -29,7 +29,7 @@ from transformers import pipeline
 class ShellAI:
     """Main class for the ShellAI tool."""
     
-    def __init__(self, model_name):
+    def __init__(self, model_name="micrictor/gemma-3-270m-it-ft-bash"):
         self.model_name = model_name
         self.model = None
         self.tokenizer = None

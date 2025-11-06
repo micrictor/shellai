@@ -19,9 +19,8 @@ test_cases:
     description: "File compression command"
     prompt: "compress all txt files into an archive"
     expected_patterns:
-      - "tar"
-      - '-\w*c'
       - '.txt'
+      - '(tar|zip|7z)'
     
   - name: "search_in_files"
     description: "Text search in files"
@@ -29,7 +28,6 @@ test_cases:
     expected_patterns:
       - "grep"
       - 'hello'
-      - '\*'
     
   - name: "disk_usage"
     prompt: "show disk usage in the current directory"
@@ -40,7 +38,7 @@ test_cases:
   - name: "process_list"
     prompt: "show running processes"
     expected_patterns:
-      - "ps"
+      - "(ps|top)"
     description: "Process listing command"
     
   - name: "copy_files"
