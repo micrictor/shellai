@@ -1,0 +1,60 @@
+name: build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            artifact: linux-x64
+            features: ""
+            executable: shellai
+          - runner: windows-2025
+            target: x86_64-pc-windows-msvc
+            artifact: windows-x64
+            features: ""
+            executable: shellai.exe
+          - runner: macos-14
+            target: aarch64-apple-darwin
+            artifact: macos-arm64
+            features: metal
+            executable: shellai
+
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Build release binary
+        shell: bash
+        run: |
+          if [[ -n '${{ matrix.features }}' ]]; then
+            cargo build --locked --release --target '${{ matrix.target }}' --features '${{ matrix.features }}'
+          else
+            cargo build --locked --release --target '${{ matrix.target }}'
+          fi
+      - name: Run tests on native runner
+        shell: bash
+        run: cargo test --locked --target '${{ matrix.target }}'
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp 'target/${{ matrix.target }}/release/${{ matrix.executable }}' dist/
+          cp shellai.plugin.zsh README.md LICENSE dist/
+          tar -czf 'shellai-${{ matrix.artifact }}.tar.gz' -C dist .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shellai-${{ matrix.artifact }}
+          path: shellai-${{ matrix.artifact }}.tar.gz

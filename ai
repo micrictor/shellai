@@ -1,8 +1,4 @@
-#!/bin/bash
-# Shellai wrapper script
-
-# Get the directory where this script is located
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Run the Python script with all arguments
-"$SCRIPT_DIR/.venv/bin/python3" "-m" "shellai" "$@"
+#!/bin/sh
+# Compatibility entry point for repository checkouts. The zsh plugin intercepts
+# interactive `ai, ...` before this process is executed.
+exec shellai ask -- "$@"

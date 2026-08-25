@@ -1,54 +1,138 @@
-## Shellai
+# Shellai
 
-[Blog post](https://short.sectorr.dev/shellai-blog)
+Shellai (pronounced “shellay”) turns a natural-language request into an editable shell command,
+entirely on the local machine. Version 0.2 is a native Rust rewrite: Python, PyTorch, Transformers,
+Frida, process injection, and the `ptrace_scope` change are no longer part of the runtime.
 
-Shellai (pronounced shellay) is a command-line interface for getting AI assistance without network calls or a separate interface.
-It's built around the idea that I should be able to, in my terminal, simply type `ai, do this thing` and have it generate the command for me.
+The default model is
+[`micrictor/gemma-3-270m-it-ft-bash-GGUF`](https://huggingface.co/micrictor/gemma-3-270m-it-ft-bash-GGUF),
+using its Q4_K_M quantization.
 
-Shellai uses local small-language models (SLMs) to fulfill user requests. Your data stays on your machine. Unlike other tools like `shellgpt`, the local inference is built into this tool - no need to turn up an ollama server seperatly.
+## How it works
 
-## Install steps
+- One `shellai` executable contains the client and server.
+- `llama.cpp`/`libllama` is compiled and linked into the executable through `llama-cpp-2`; users do
+  not need Ollama or a separately installed inference server.
+- The client talks to a per-user Unix domain socket on Linux/macOS or a named pipe on Windows.
+- If no server is listening, the client starts one and retries the request automatically.
+- The GGUF is loaded only for inference. After 60 seconds without an inference request, the server
+  drops the model and returns its memory to the operating system. The lightweight server remains
+  ready for the next request.
+- The model is downloaded once into the normal Hugging Face cache, or a local GGUF can be selected.
 
-1. `git clone https://github.com/micrictor/shellai.git && cd shellai && pip install -e .` 
-1.  `ptrace` must be allowed for all processes owned by the same user. This can be set temporarily (until next reboot) using `echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope`.
-    *   Setting this can be bad, since it allows any process running as a user to access memory/internal state of all other processes for that user.
-2.  `hf login` to set up your HuggingFace credentials for use to download the model.
-3.  In HuggingFace, accept the [Gemma license](https://huggingface.co/google/gemma-3-270m-it) and request access to [my finetuned model, which is the default for the tool](https://huggingface.co/micrictor/gemma-3-270m-it-ft-bash). This is optional if you want to use other models - sorry for the added friction, but the Gemma3 license/TOS is hard to understand so I don't know if I can have it "public".
-4.  Run your first prompt, like `ai, show me the last 10 lines of the readme`
+## Install
 
-## Model tests
+Release archives contain the native executable and `shellai.plugin.zsh`.
 
-Looking for some variant on "grep all the files for 'root'"
+1. Put `shellai` (or `shellai.exe`) on `PATH`.
+2. Accept the Gemma license on the model page and authenticate with either `hf auth login` or an
+   `HF_TOKEN` environment variable.
+3. Source the plugin from `.zshrc`:
 
-### Untrained
+   ```zsh
+   source /path/to/shellai.plugin.zsh
+   ```
 
-```bash
-(.venv) [mtu@archlap shellai]$ time ai, --model google/gemma-3-270m-it list every file in /etc that contains the string "root"
-Using model google/gemma-3-270m-it
-🐢🐢🐢🐢🐢🐢🐢🐢
-real	0m11.176s
-user	0m12.742s
-sys	0m1.086s
-(.venv) [mtu@archlap shellai]$ ls -l /etc^C
-(.venv) [mtu@archlap shellai]$ time ai, --model google/gemma-3-270m-it list every file in /etc that contains the string "root"
-Using model google/gemma-3-270m-it
-🐢🐢🐢
-real	0m5.206s
-user	0m12.841s
-sys	0m1.010s
-(.venv) [mtu@archlap shellai]$ ls /etc/passwd
+4. Optionally pre-download the default quant:
+
+   ```console
+   shellai download
+   ```
+
+The first request can also perform the download automatically. Windows builds use a native named
+pipe; the zsh integration can be sourced from a Windows zsh environment such as MSYS2.
+
+## Use from zsh
+
+Type the existing trigger and press Enter:
+
+```console
+ai, show the ten largest files in this directory
 ```
 
-### Trained
+The request is replaced in the current ZLE buffer by the generated command. It is never executed
+automatically—review or edit it, then press Enter again.
 
-```bash
-(.venv) [mtu@archlap shellai]$ time ai, list every file in /etc that contains the string "root"
-Using model micrictor/gemma-3-270m-it-ft-bash
-🐢🐢🐢🐢🐢🐢🐢🐢
-real	0m10.549s
-user	0m19.052s
-sys	0m1.059s
-(.venv) [mtu@archlap shellai]$ find /etc -type f -exec grep -l root '{}' \;
+Press `Alt-A` to open a separate minibuffer, similar to manai. The command already in the main
+buffer is sent as context, and the answer replaces it. Change the binding before sourcing the
+plugin if desired:
+
+```zsh
+export SHELLAI_HOTKEY='^G'
+source /path/to/shellai.plugin.zsh
 ```
 
+The native client is also usable directly:
 
+```console
+shellai ask -- "find files modified in the last 24 hours"
+shellai ask --context "git log" -- "only show commits from this week"
+```
+
+## Configuration
+
+Create a default config and print its path:
+
+```console
+shellai config --init
+```
+
+Linux normally uses `~/.config/shellai/config.toml`; platform conventions are used on macOS and
+Windows. Available values are:
+
+```toml
+# Set this to bypass Hugging Face entirely.
+# model_path = "/models/gemma-3-270m-it-ft-bash-Q4_K_M.gguf"
+
+repository = "micrictor/gemma-3-270m-it-ft-bash-GGUF"
+model_file = "gemma-3-270m-it-ft-bash-Q4_K_M.gguf"
+model_ttl_seconds = 60
+context_size = 2048
+max_new_tokens = 256
+# threads = 8
+gpu_layers = 999
+```
+
+`SHELLAI_MODEL` overrides `model_path`, and `SHELLAI_MODEL_TTL` overrides the TTL. A TTL of `0`
+unloads immediately after each request. Restart the server after changing configuration:
+
+```console
+shellai stop
+```
+
+Useful lifecycle commands:
+
+```console
+shellai status
+shellai server --model-ttl 300   # foreground/debug mode
+shellai stop
+shellai plugin                   # print the bundled plugin
+```
+
+## Build
+
+Requirements are Rust 1.89 or newer, CMake, Clang/libclang, a C/C++ compiler, and Git. The Rust
+build compiles the bundled `llama.cpp` sources and statically links its libraries.
+
+```console
+cargo build --release
+cargo test --locked
+```
+
+Apple Silicon enables the Metal backend automatically; it can also be requested explicitly with
+`cargo build --release --features metal`. Optional CUDA and Vulkan builds use the corresponding
+Cargo features and require their platform SDKs.
+
+Continuous integration compiles the release targets requested by the project:
+
+- `x86_64-unknown-linux-gnu` (Linux x64)
+- `x86_64-pc-windows-msvc` (Windows x64)
+- `aarch64-apple-darwin` (macOS Apple Silicon/Metal)
+
+## Protocol and safety
+
+IPC messages are bounded, newline-delimited JSON. Unix sockets live inside a mode-0700 per-user
+cache directory. Generated text is inserted into the editable command line and is not run by
+Shellai. As with any generated command, inspect it before execution.
+
+Shellai is MIT licensed. The downloaded model remains subject to the Gemma license.
