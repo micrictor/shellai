@@ -99,7 +99,7 @@ fn handle_connection(connection: Stream, service: &mut ModelService) -> Result<H
             let started = Instant::now();
             let memory_monitor = MemoryMonitor::start();
             if let Some(config) = inference_config {
-                service.apply_inference_config(config);
+                service.apply_inference_config(*config);
             }
             let response = if prompt.trim().is_empty() {
                 let memory = memory_monitor.finish();

@@ -21,7 +21,7 @@ pub enum Request {
         #[serde(default)]
         stop_after: Option<String>,
         #[serde(default)]
-        inference_config: Option<InferenceConfig>,
+        inference_config: Option<Box<InferenceConfig>>,
     },
     Status,
     Shutdown,
@@ -101,7 +101,9 @@ mod tests {
             stage: Some("search".into()),
             assistant_prefix: None,
             stop_after: None,
-            inference_config: Some(crate::config::Config::default().inference_config()),
+            inference_config: Some(Box::new(
+                crate::config::Config::default().inference_config(),
+            )),
         })
         .unwrap();
         let decoded: Request = serde_json::from_str(&encoded).unwrap();

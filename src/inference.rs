@@ -12,6 +12,9 @@ use llama_cpp_2::{
 
 use crate::config::{Config, InferenceConfig};
 
+pub(crate) const COMMAND_OPEN_TAG: &str = "<shellai-command>";
+pub(crate) const COMMAND_CLOSE_TAG: &str = "</shellai-command>";
+
 pub struct ModelService {
     config: Config,
     backend: LlamaBackend,
@@ -107,7 +110,7 @@ pub fn resolve_model_path(config: &Config) -> Result<PathBuf> {
         .get(&config.model_file)
         .with_context(|| {
             format!(
-                "failed to download {}/{}; accept the Gemma license and authenticate with HF_TOKEN or `hf auth login`",
+                "failed to download {}/{}; check network access and authenticate with HF_TOKEN or `hf auth login` if required",
                 config.repository, config.model_file
             )
         })
@@ -277,13 +280,34 @@ fn generate_command(
             .context("failed to generate a token")?;
     }
 
-    let command = clean_generated_command(&output);
+    let command = if prefix == Some(COMMAND_OPEN_TAG) {
+        extract_command_envelope(&output)?
+    } else {
+        clean_generated_command(&output)
+    };
     anyhow::ensure!(!command.is_empty(), "the model returned an empty command");
     Ok(Generation {
         text: command,
         prompt_tokens,
         completion_tokens,
     })
+}
+
+fn extract_command_envelope(output: &str) -> Result<String> {
+    let trimmed = output.trim();
+    let body = trimmed
+        .strip_prefix(COMMAND_OPEN_TAG)
+        .context("the model response did not start with the command envelope")?;
+    let (command, trailing) = body
+        .split_once(COMMAND_CLOSE_TAG)
+        .context("the model response did not close the command envelope")?;
+    anyhow::ensure!(
+        trailing.trim().is_empty(),
+        "the model returned content after the command envelope"
+    );
+    let command = clean_generated_command(command);
+    anyhow::ensure!(!command.is_empty(), "the model returned an empty command");
+    Ok(command)
 }
 
 pub(crate) fn clean_generated_command(output: &str) -> String {
@@ -317,5 +341,22 @@ mod tests {
     #[test]
     fn normalizes_smart_quotes() {
         assert_eq!(clean_generated_command("echo “hello”"), "echo \"hello\"");
+    }
+
+    #[test]
+    fn extracts_only_the_enveloped_command() {
+        assert_eq!(
+            extract_command_envelope(
+                "<shellai-command>find /etc -type f -exec grep -l root '{}' \\;</shellai-command>"
+            )
+            .unwrap(),
+            "find /etc -type f -exec grep -l root '{}' \\;"
+        );
+    }
+
+    #[test]
+    fn rejects_an_unclosed_command_envelope() {
+        let error = extract_command_envelope("<shellai-command>find /etc -type f").unwrap_err();
+        assert!(error.to_string().contains("did not close"));
     }
 }

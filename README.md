@@ -5,8 +5,8 @@ entirely on the local machine. Version 0.2 is a native Rust rewrite: Python, PyT
 Frida, process injection, and the `ptrace_scope` change are no longer part of the runtime.
 
 The default model is
-[`micrictor/gemma-3-270m-it-ft-bash-GGUF`](https://huggingface.co/micrictor/gemma-3-270m-it-ft-bash-GGUF),
-using its Q8_0 quantization.
+[`LiquidAI/LFM2.5-1.2B-Instruct-GGUF`](https://huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct-GGUF),
+using its Quantization-Aware Distillation Q4_0 checkpoint.
 
 ## How it works
 
@@ -25,8 +25,8 @@ using its Q8_0 quantization.
 Release archives contain the native executable and `shellai.plugin.zsh`.
 
 1. Put `shellai` (or `shellai.exe`) on `PATH`.
-2. Accept the Gemma license on the model page and authenticate with either `hf auth login` or an
-   `HF_TOKEN` environment variable.
+2. Ensure Hugging Face is reachable. If authentication is required in your environment, use
+   either `hf auth login` or an `HF_TOKEN` environment variable.
 3. Source the plugin from `.zshrc`:
 
    ```zsh
@@ -69,6 +69,10 @@ shellai ask -- "find files modified in the last 24 hours"
 shellai ask --context "git log" -- "only show commits from this week"
 ```
 
+Zero-shot inference is the default. It constrains the model response with an internal command
+envelope, stops generation at the closing marker, validates the complete envelope, and prints only
+the command within it. The envelope is never included in the command inserted into ZLE.
+
 ### Guided workflow experiment
 
 The proposed help-grounded workflow is available explicitly:
@@ -84,18 +88,17 @@ for final generation. Invalid or empty discovery searches and invalid selections
 three times. Local help processes have a 15-second timeout. Model text is treated as data and is
 never evaluated as a general shell command during this workflow.
 
-This mode is experimental and is not the default. Evaluation with the current command-specialized
-270M fine-tune found that it often solves the request directly instead of following the discovery
-or selection instruction. Use `--workflow zero-shot` (the default) for its trained behavior and
-compare the metric logs when iterating on a more instruction-capable model.
+This mode is experimental and is not the default. Current evaluations found that the models often
+solve the request directly instead of following the discovery or selection instruction. Use
+`--workflow zero-shot` (the default) for normal command generation.
 
-The official LFM2.5-1.2B-Instruct GGUF can be evaluated by setting `SHELLAI_MODEL` to its local
-path. Liquid AI's recommended llama.cpp sampling can be selected without changing the config:
+The QAD checkpoint and Liquid AI sampling values are the defaults. An alternate GGUF can still be
+evaluated without changing the config:
 
 ```console
 SHELLAI_MODEL=/models/LFM2.5-1.2B-Instruct-Q8_0.gguf \
 SHELLAI_TOP_K=50 SHELLAI_TEMPERATURE=0.1 SHELLAI_REPEAT_PENALTY=1.05 \
-shellai ask --workflow guided -- "list every file in /etc containing root"
+shellai ask --workflow zero-shot -- "list every file in /etc containing root"
 ```
 
 ## Configuration
@@ -111,25 +114,29 @@ Windows. Available values are:
 
 ```toml
 # Set this to bypass Hugging Face entirely.
-# model_path = "/models/gemma-3-270m-it-ft-bash-Q8_0.gguf"
+# model_path = "/models/LFM2.5-1.2B-Instruct-QAD-Q4_0.gguf"
 
-repository = "micrictor/gemma-3-270m-it-ft-bash-GGUF"
-model_file = "gemma-3-270m-it-ft-bash-Q8_0.gguf"
+repository = "LiquidAI/LFM2.5-1.2B-Instruct-GGUF"
+model_file = "LFM2.5-1.2B-Instruct-QAD-Q4_0.gguf"
 model_ttl_seconds = 60
 context_size = 32768
 max_new_tokens = 256
 # threads = 8
 gpu_layers = 999
-top_k = 64
+top_k = 50
 top_p = 0.95
-temperature = 1.0
-repeat_penalty = 1.0
+temperature = 0.1
+repeat_penalty = 1.05
 # seed = 42  # Uncomment for reproducible output.
 ```
 
-The sampling defaults mirror the fine-tuned model's Transformers `generation_config.json`:
-`do_sample = true`, `top_k = 64`, and `top_p = 0.95`. Consequently, exact commands can vary
-between requests. Set `seed` when deterministic output is more important than fresh sampling.
+An existing config remains authoritative and is not rewritten during upgrades. To adopt the new
+LFM2.5 QAD default, update its `repository` and `model_file` values as shown above (and remove an
+old `model_path` override), or move the config aside and run `shellai config --init` again.
+
+The sampling defaults use Liquid AI's recommended `top_k = 50`, `temperature = 0.1`, and
+`repeat_penalty = 1.05`; `top_p` remains `0.95`. Exact commands can still vary between requests.
+Set `seed` when deterministic output is more important than fresh sampling.
 
 `SHELLAI_MODEL` overrides `model_path`, and `SHELLAI_MODEL_TTL` overrides the TTL. Sampler values
 can be overridden for model evaluation with `SHELLAI_TOP_K`, `SHELLAI_TEMPERATURE`, and
