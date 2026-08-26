@@ -200,12 +200,25 @@ fn generate_command(
         config.top_p > 0.0 && config.top_p <= 1.0,
         "top_p must be greater than zero and at most one"
     );
+    anyhow::ensure!(
+        config.temperature >= 0.0,
+        "temperature must be zero or greater"
+    );
+    anyhow::ensure!(
+        config.repeat_penalty > 0.0,
+        "repeat_penalty must be greater than zero"
+    );
     let mut sampler = LlamaSampler::chain_simple([
+        LlamaSampler::penalties(-1, config.repeat_penalty, 0.0, 0.0),
         LlamaSampler::top_k(config.top_k),
         LlamaSampler::top_p(config.top_p, 1),
+        LlamaSampler::temp(config.temperature),
         // LLAMA_DEFAULT_SEED asks llama.cpp to select a random seed.
         LlamaSampler::dist(config.seed.unwrap_or(u32::MAX)),
     ]);
+    for token in tokens.iter().copied() {
+        sampler.accept(token);
+    }
     let mut decoder = encoding_rs::UTF_8.new_decoder();
     let mut output = String::new();
     let mut position = i32::try_from(tokens.len()).context("prompt position exceeds i32")?;
@@ -217,6 +230,7 @@ fn generate_command(
             "assistant prefix is too long for the configured context"
         );
         for token in prefix_tokens.iter().copied() {
+            sampler.accept(token);
             batch.clear();
             batch.add(token, position, &[0], true)?;
             position += 1;

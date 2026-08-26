@@ -120,8 +120,8 @@ impl WorkflowRun {
                 InferenceOptions {
                     context: None,
                     system_prompt: Some(discovery_system_prompt()),
-                    assistant_prefix: Some(discovery_prefix()),
-                    stop_after: Some("'"),
+                    assistant_prefix: None,
+                    stop_after: None,
                     stage: "command_search",
                     cold_start,
                 },
@@ -292,46 +292,38 @@ impl WorkflowRun {
 
 #[cfg(unix)]
 fn discovery_system_prompt() -> &'static str {
-    "You translate requests into exactly one Bash command. For this step the only permitted command is `man -k`. Always output `man -k` followed by one quoted regular expression, using | between alternative descriptions so relevant results are not excluded. Never output find, grep, apropos, pipes, redirects, explanations, or Markdown. Example output: man -k 'search.*file|match.*pattern'"
+    "Return only one broad apropos regular expression describing what relevant commands do. Use | between alternative descriptions. Do not output command names, shell commands, flags, paths, quotes, Markdown, or explanations. Example: search.*file|match.*pattern"
 }
 
 #[cfg(windows)]
 fn discovery_system_prompt() -> &'static str {
-    "Turn the request into a PowerShell help search. Return exactly one command in the form: Get-Help -Name '*keyword*'. Do not solve the request and do not use pipes or additional commands."
-}
-
-#[cfg(unix)]
-fn discovery_prefix() -> &'static str {
-    "man -k '"
-}
-
-#[cfg(windows)]
-fn discovery_prefix() -> &'static str {
-    "Get-Help -Name '"
+    "Return only one PowerShell Get-Help name pattern such as *content*. Do not output a command, flags, paths, quotes, Markdown, or an explanation."
 }
 
 #[cfg(unix)]
 fn discovery_prompt(prompt: &str) -> String {
     format!(
-        "Generate a man -k command to search command descriptions relevant to this request. Do not fulfill the request yet. Request: {prompt}"
+        "Write an apropos manual-description search expression for tools relevant to this request. Do not fulfill the request yet. Request: {prompt}"
     )
 }
 
 #[cfg(windows)]
 fn discovery_prompt(prompt: &str) -> String {
     format!(
-        "Generate a Get-Help -Name command to search PowerShell help relevant to this request. Do not fulfill the request yet. Request: {prompt}"
+        "Write a Get-Help name search pattern for commands relevant to this request. Do not fulfill the request yet. Request: {prompt}"
     )
 }
 
 #[cfg(unix)]
 fn final_system_prompt() -> &'static str {
-    "You are a shell-command generator. Ground the answer in the supplied complete manual pages. Return exactly one Bash command and no explanation."
+    "You are a shell-command generator. Ground the answer in the supplied complete manual pages and use the selected documented commands. Match the requested output precisely: distinguish paths from file contents, and recurse when the scope is a directory. Return exactly one Bash command and no explanation."
 }
 
 #[cfg(unix)]
 fn selection_system_prompt() -> Option<&'static str> {
-    None
+    Some(
+        "Select command names only from the supplied help-search results. Return one or two exact names and no explanation.",
+    )
 }
 
 #[cfg(windows)]
@@ -343,7 +335,7 @@ fn selection_system_prompt() -> Option<&'static str> {
 
 #[cfg(windows)]
 fn final_system_prompt() -> &'static str {
-    "You are a PowerShell-command generator. Ground the answer in the supplied complete help pages. Return exactly one PowerShell command and no explanation."
+    "You are a PowerShell-command generator. Ground the answer in the supplied complete help pages and use the selected documented commands. Match the requested output precisely: distinguish paths from file contents, and recurse when the scope is a directory. Return exactly one PowerShell command and no explanation."
 }
 
 #[cfg(unix)]
@@ -366,25 +358,82 @@ fn run_discovery_command(generated: &str) -> Result<String> {
 #[cfg(unix)]
 fn parse_man_search(generated: &str) -> Result<String> {
     let line = single_line(generated)?;
-    let rest = line
-        .strip_prefix("man -k ")
-        .context("the model did not return a `man -k` command")?;
-    let query = strip_matching_quotes(rest.trim());
-    anyhow::ensure!(!query.is_empty(), "the model returned an empty man search");
+    let rest = line.strip_prefix("man -k ").unwrap_or(line);
+    normalize_apropos_expression(strip_matching_quotes(rest.trim()))
+}
+
+#[cfg(unix)]
+fn normalize_apropos_expression(value: &str) -> Result<String> {
+    anyhow::ensure!(!value.is_empty(), "the model returned an empty man search");
     anyhow::ensure!(
-        !query.starts_with('-'),
-        "man search may not begin with an option"
+        !value.contains(['\0', '\n', '\r', ';', '&', '<', '>', '`']),
+        "man search contains unsupported command syntax"
     );
+    let stopwords = [
+        "a", "all", "an", "and", "command", "commands", "display", "every", "for", "in", "list",
+        "of", "the", "to", "tool", "tools", "with",
+    ];
+    let mut expressions = Vec::new();
+    for segment in value.split('|') {
+        let mut words = Vec::new();
+        for word in segment.split(|character: char| !character.is_ascii_alphabetic()) {
+            let word = stem_search_word(word);
+            if !word.is_empty() && !stopwords.contains(&word.as_str()) && !words.contains(&word) {
+                words.push(word);
+            }
+        }
+        let expression = match words.as_slice() {
+            [] => continue,
+            [word] => word.clone(),
+            words => format!("{}.*{}", words[0], words[words.len() - 1]),
+        };
+        if !expressions.contains(&expression) {
+            expressions.push(expression);
+        }
+        if expressions.len() == 8 {
+            break;
+        }
+    }
     anyhow::ensure!(
-        !query.contains(['\0', '\n', '\r']),
-        "man search contains invalid control characters"
+        !expressions.is_empty(),
+        "the model returned no usable manual-description terms"
     );
-    Ok(query.to_owned())
+    Ok(expressions.join("|"))
+}
+
+#[cfg(unix)]
+fn stem_search_word(word: &str) -> String {
+    let mut word = word.to_ascii_lowercase();
+    if word.len() > 5 && word.ends_with("ing") {
+        word.truncate(word.len() - 3);
+    } else if word.len() > 4 && word.ends_with("ies") {
+        word.truncate(word.len() - 3);
+        word.push('y');
+    } else if word.len() > 4
+        && ["ses", "xes", "zes", "ches", "shes"]
+            .iter()
+            .any(|ending| word.ends_with(ending))
+    {
+        word.truncate(word.len() - 2);
+    } else if word.len() > 3 && word.ends_with('s') {
+        word.pop();
+    }
+    word
 }
 
 #[cfg(windows)]
 fn parse_get_help_search(generated: &str) -> Result<String> {
     let line = single_line(generated)?;
+    if !line.to_ascii_lowercase().starts_with("get-help ") {
+        let query = strip_matching_quotes(line);
+        anyhow::ensure!(
+            query.chars().all(|character| {
+                character.is_ascii_alphanumeric() || "*?-_.".contains(character)
+            }),
+            "Get-Help search contains unsupported characters"
+        );
+        return Ok(query.to_owned());
+    }
     let mut words = line.split_ascii_whitespace();
     anyhow::ensure!(
         words
@@ -618,12 +667,19 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn accepts_only_a_single_man_search() {
+    fn normalizes_a_single_manual_description_search() {
         assert_eq!(
             parse_man_search("man -k 'file contents'").unwrap(),
-            "file contents"
+            "file.*content"
         );
-        assert!(parse_man_search("find /tmp").is_err());
+        assert_eq!(
+            parse_man_search(
+                "| List files with \"root\" in /etc | Search for string \"root\" across files | Display matching patterns |"
+            )
+            .unwrap(),
+            "file.*etc|search.*file|match.*pattern"
+        );
+        assert_eq!(parse_man_search("find /tmp").unwrap(), "find.*tmp");
         assert!(parse_man_search("man -k file\nwhoami").is_err());
     }
 

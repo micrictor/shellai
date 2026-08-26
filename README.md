@@ -77,17 +77,26 @@ The proposed help-grounded workflow is available explicitly:
 shellai ask --workflow guided -- "list every file in /etc containing root"
 ```
 
-It performs up to four phases: asks the model for a `man -k` search (`Get-Help -Name` on
-Windows), executes that constrained search without a shell, asks the model to select one or two
+It performs up to four phases: asks the model for a manual-description expression, safely
+normalizes it and runs `man -k` (`Get-Help -Name` on Windows), asks the model to select one or two
 names that actually appeared in the results, then supplies the complete selected man/help pages
 for final generation. Invalid or empty discovery searches and invalid selections are retried up to
-three times. Local help processes have a 15-second timeout. Model text is never evaluated as a
-general shell command during this workflow.
+three times. Local help processes have a 15-second timeout. Model text is treated as data and is
+never evaluated as a general shell command during this workflow.
 
 This mode is experimental and is not the default. Evaluation with the current command-specialized
 270M fine-tune found that it often solves the request directly instead of following the discovery
 or selection instruction. Use `--workflow zero-shot` (the default) for its trained behavior and
 compare the metric logs when iterating on a more instruction-capable model.
+
+The official LFM2.5-1.2B-Instruct GGUF can be evaluated by setting `SHELLAI_MODEL` to its local
+path. Liquid AI's recommended llama.cpp sampling can be selected without changing the config:
+
+```console
+SHELLAI_MODEL=/models/LFM2.5-1.2B-Instruct-Q8_0.gguf \
+SHELLAI_TOP_K=50 SHELLAI_TEMPERATURE=0.1 SHELLAI_REPEAT_PENALTY=1.05 \
+shellai ask --workflow guided -- "list every file in /etc containing root"
+```
 
 ## Configuration
 
@@ -113,6 +122,8 @@ max_new_tokens = 256
 gpu_layers = 999
 top_k = 64
 top_p = 0.95
+temperature = 1.0
+repeat_penalty = 1.0
 # seed = 42  # Uncomment for reproducible output.
 ```
 
@@ -120,7 +131,9 @@ The sampling defaults mirror the fine-tuned model's Transformers `generation_con
 `do_sample = true`, `top_k = 64`, and `top_p = 0.95`. Consequently, exact commands can vary
 between requests. Set `seed` when deterministic output is more important than fresh sampling.
 
-`SHELLAI_MODEL` overrides `model_path`, and `SHELLAI_MODEL_TTL` overrides the TTL. A TTL of `0`
+`SHELLAI_MODEL` overrides `model_path`, and `SHELLAI_MODEL_TTL` overrides the TTL. Sampler values
+can be overridden for model evaluation with `SHELLAI_TOP_K`, `SHELLAI_TEMPERATURE`, and
+`SHELLAI_REPEAT_PENALTY`. A TTL of `0`
 unloads immediately after each request. Restart the server after changing configuration:
 
 ```console

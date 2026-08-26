@@ -22,6 +22,8 @@ pub struct Config {
     /// Transformers-compatible sampling controls from generation_config.json.
     pub top_k: i32,
     pub top_p: f32,
+    pub temperature: f32,
+    pub repeat_penalty: f32,
     /// None requests a fresh random seed from llama.cpp for each sampler.
     pub seed: Option<u32>,
 }
@@ -41,6 +43,8 @@ impl Default for Config {
             gpu_layers: 999,
             top_k: 64,
             top_p: 0.95,
+            temperature: 1.0,
+            repeat_penalty: 1.0,
             seed: None,
         }
     }
@@ -64,6 +68,19 @@ impl Config {
             config.model_ttl_seconds = value
                 .parse()
                 .context("SHELLAI_MODEL_TTL must be an integer number of seconds")?;
+        }
+        if let Ok(value) = std::env::var("SHELLAI_TOP_K") {
+            config.top_k = value.parse().context("SHELLAI_TOP_K must be an integer")?;
+        }
+        if let Ok(value) = std::env::var("SHELLAI_TEMPERATURE") {
+            config.temperature = value
+                .parse()
+                .context("SHELLAI_TEMPERATURE must be a number")?;
+        }
+        if let Ok(value) = std::env::var("SHELLAI_REPEAT_PENALTY") {
+            config.repeat_penalty = value
+                .parse()
+                .context("SHELLAI_REPEAT_PENALTY must be a number")?;
         }
         Ok(config)
     }
@@ -108,6 +125,8 @@ mod tests {
         assert_eq!(config.context_size, 32768);
         assert_eq!(config.top_k, 64);
         assert_eq!(config.top_p, 0.95);
+        assert_eq!(config.temperature, 1.0);
+        assert_eq!(config.repeat_penalty, 1.0);
         assert_eq!(config.seed, None);
     }
 }
