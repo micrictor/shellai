@@ -53,7 +53,6 @@ pub fn request(request: &Request, cold_start: bool) -> Result<Response> {
     match connect_and_send(request) {
         Ok(response) => Ok(response),
         Err(first_error) if cold_start => {
-            eprintln!("Starting the local shellai server…");
             spawn_server().context("failed to cold-start the shellai server")?;
             let deadline = Instant::now() + Duration::from_secs(10);
             let mut last_error = first_error;
