@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::config::InferenceConfig;
+
 pub const MAX_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -18,6 +20,8 @@ pub enum Request {
         assistant_prefix: Option<String>,
         #[serde(default)]
         stop_after: Option<String>,
+        #[serde(default)]
+        inference_config: Option<InferenceConfig>,
     },
     Status,
     Shutdown,
@@ -97,6 +101,7 @@ mod tests {
             stage: Some("search".into()),
             assistant_prefix: None,
             stop_after: None,
+            inference_config: Some(crate::config::Config::default().inference_config()),
         })
         .unwrap();
         let decoded: Request = serde_json::from_str(&encoded).unwrap();

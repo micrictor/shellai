@@ -92,11 +92,15 @@ fn handle_connection(connection: Stream, service: &mut ModelService) -> Result<H
             stage,
             assistant_prefix,
             stop_after,
+            inference_config,
         } => {
             let stage = stage.unwrap_or_else(|| "zero_shot".into());
             let request_id = metrics::new_id("inference");
             let started = Instant::now();
             let memory_monitor = MemoryMonitor::start();
+            if let Some(config) = inference_config {
+                service.apply_inference_config(config);
+            }
             let response = if prompt.trim().is_empty() {
                 let memory = memory_monitor.finish();
                 let metrics = crate::protocol::InferenceMetrics {

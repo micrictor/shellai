@@ -10,7 +10,7 @@ use llama_cpp_2::{
     sampling::LlamaSampler,
 };
 
-use crate::config::Config;
+use crate::config::{Config, InferenceConfig};
 
 pub struct ModelService {
     config: Config,
@@ -51,6 +51,12 @@ impl ModelService {
 
     pub fn unload(&mut self) {
         self.model.take();
+    }
+
+    pub fn apply_inference_config(&mut self, config: InferenceConfig) {
+        if config.apply_to(&mut self.config) {
+            self.unload();
+        }
     }
 
     pub fn generate(

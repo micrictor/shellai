@@ -133,8 +133,10 @@ between requests. Set `seed` when deterministic output is more important than fr
 
 `SHELLAI_MODEL` overrides `model_path`, and `SHELLAI_MODEL_TTL` overrides the TTL. Sampler values
 can be overridden for model evaluation with `SHELLAI_TOP_K`, `SHELLAI_TEMPERATURE`, and
-`SHELLAI_REPEAT_PENALTY`. A TTL of `0`
-unloads immediately after each request. Restart the server after changing configuration:
+`SHELLAI_REPEAT_PENALTY`. Model and sampler settings are sent with each inference request, so they
+take effect even when the server is already running. If the requested model differs from the one
+in memory, the server unloads it and loads the requested model. A TTL of `0` unloads immediately
+after each request. The TTL is a server lifecycle setting, so restart the server after changing it:
 
 ```console
 shellai stop

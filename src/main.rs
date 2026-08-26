@@ -30,7 +30,7 @@ fn run() -> Result<()> {
         } => {
             let prompt = prompt.join(" ").trim().to_owned();
             anyhow::ensure!(!prompt.is_empty(), "a request is required");
-            let command = workflow::run(&prompt, context.as_deref(), workflow, !no_start)?;
+            let command = workflow::run(&prompt, context.as_deref(), workflow, !no_start, &config)?;
             println!("{command}");
             Ok(())
         }

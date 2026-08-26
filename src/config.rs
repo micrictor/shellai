@@ -28,6 +28,26 @@ pub struct Config {
     pub seed: Option<u32>,
 }
 
+/// Per-inference settings sent by the client to an already-running server.
+///
+/// The model TTL is intentionally excluded: it controls the lifetime of the
+/// server loop rather than an individual request.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct InferenceConfig {
+    pub model_path: Option<PathBuf>,
+    pub repository: String,
+    pub model_file: String,
+    pub context_size: u32,
+    pub max_new_tokens: u32,
+    pub threads: Option<i32>,
+    pub gpu_layers: u32,
+    pub top_k: i32,
+    pub top_p: f32,
+    pub temperature: f32,
+    pub repeat_penalty: f32,
+    pub seed: Option<u32>,
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -85,6 +105,23 @@ impl Config {
         Ok(config)
     }
 
+    pub fn inference_config(&self) -> InferenceConfig {
+        InferenceConfig {
+            model_path: self.model_path.clone(),
+            repository: self.repository.clone(),
+            model_file: self.model_file.clone(),
+            context_size: self.context_size,
+            max_new_tokens: self.max_new_tokens,
+            threads: self.threads,
+            gpu_layers: self.gpu_layers,
+            top_k: self.top_k,
+            top_p: self.top_p,
+            temperature: self.temperature,
+            repeat_penalty: self.repeat_penalty,
+            seed: self.seed,
+        }
+    }
+
     pub fn path() -> Result<PathBuf> {
         Ok(project_dirs()?.config_dir().join("config.toml"))
     }
@@ -104,6 +141,32 @@ impl Config {
                 .with_context(|| format!("failed to write {}", path.display()))?;
         }
         Ok(path)
+    }
+}
+
+impl InferenceConfig {
+    /// Applies client settings and reports whether the loaded model must be
+    /// discarded. Context and sampler settings take effect on the next
+    /// generation without reloading the model weights.
+    pub fn apply_to(self, config: &mut Config) -> bool {
+        let reload = config.model_path != self.model_path
+            || config.repository != self.repository
+            || config.model_file != self.model_file
+            || config.gpu_layers != self.gpu_layers;
+
+        config.model_path = self.model_path;
+        config.repository = self.repository;
+        config.model_file = self.model_file;
+        config.context_size = self.context_size;
+        config.max_new_tokens = self.max_new_tokens;
+        config.threads = self.threads;
+        config.gpu_layers = self.gpu_layers;
+        config.top_k = self.top_k;
+        config.top_p = self.top_p;
+        config.temperature = self.temperature;
+        config.repeat_penalty = self.repeat_penalty;
+        config.seed = self.seed;
+        reload
     }
 }
 
@@ -128,5 +191,24 @@ mod tests {
         assert_eq!(config.temperature, 1.0);
         assert_eq!(config.repeat_penalty, 1.0);
         assert_eq!(config.seed, None);
+    }
+
+    #[test]
+    fn inference_config_updates_live_settings_and_detects_model_changes() {
+        let mut server = Config::default();
+        let mut request = server.inference_config();
+        request.temperature = 0.1;
+        request.top_k = 50;
+        assert!(!request.apply_to(&mut server));
+        assert_eq!(server.temperature, 0.1);
+        assert_eq!(server.top_k, 50);
+
+        let mut request = server.inference_config();
+        request.model_path = Some("/tmp/alternate.gguf".into());
+        assert!(request.apply_to(&mut server));
+        assert_eq!(
+            server.model_path,
+            Some(PathBuf::from("/tmp/alternate.gguf"))
+        );
     }
 }

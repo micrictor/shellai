@@ -11,6 +11,7 @@ use serde::Serialize;
 
 use crate::{
     cli::WorkflowMode,
+    config::{Config, InferenceConfig},
     metrics,
     protocol::{InferenceMetrics, Request},
     transport,
@@ -24,8 +25,9 @@ pub fn run(
     context: Option<&str>,
     mode: WorkflowMode,
     cold_start: bool,
+    config: &Config,
 ) -> Result<String> {
-    let mut run = WorkflowRun::new(mode);
+    let mut run = WorkflowRun::new(mode, config.inference_config());
     let result = match mode {
         WorkflowMode::Guided => run.guided(prompt, context, cold_start),
         WorkflowMode::ZeroShot => run.zero_shot(prompt, context, cold_start),
@@ -46,6 +48,7 @@ struct WorkflowRun {
     peak_server_rss_bytes: u64,
     discovery_command_ms: u64,
     help_command_ms: u64,
+    inference_config: InferenceConfig,
 }
 
 struct InferenceOptions<'a> {
@@ -75,7 +78,7 @@ struct ClientMetrics<'a> {
 }
 
 impl WorkflowRun {
-    fn new(mode: WorkflowMode) -> Self {
+    fn new(mode: WorkflowMode, inference_config: InferenceConfig) -> Self {
         Self {
             workflow_id: metrics::new_id("workflow"),
             mode,
@@ -88,6 +91,7 @@ impl WorkflowRun {
             peak_server_rss_bytes: 0,
             discovery_command_ms: 0,
             help_command_ms: 0,
+            inference_config,
         }
     }
 
@@ -240,6 +244,7 @@ impl WorkflowRun {
             stage: Some(options.stage.to_owned()),
             assistant_prefix: options.assistant_prefix.map(str::to_owned),
             stop_after: options.stop_after.map(str::to_owned),
+            inference_config: Some(self.inference_config.clone()),
         };
         let response = transport::request(&request, options.cold_start)?;
         if let Some(metric) = &response.metrics {
