@@ -6,7 +6,7 @@ Frida, process injection, and the `ptrace_scope` change are no longer part of th
 
 The default model is
 [`micrictor/gemma-3-270m-it-ft-bash-GGUF`](https://huggingface.co/micrictor/gemma-3-270m-it-ft-bash-GGUF),
-using its Q4_K_M quantization.
+using its Q8_0 quantization.
 
 ## How it works
 
@@ -82,10 +82,10 @@ Windows. Available values are:
 
 ```toml
 # Set this to bypass Hugging Face entirely.
-# model_path = "/models/gemma-3-270m-it-ft-bash-Q4_K_M.gguf"
+# model_path = "/models/gemma-3-270m-it-ft-bash-Q8_0.gguf"
 
 repository = "micrictor/gemma-3-270m-it-ft-bash-GGUF"
-model_file = "gemma-3-270m-it-ft-bash-Q4_K_M.gguf"
+model_file = "gemma-3-270m-it-ft-bash-Q8_0.gguf"
 model_ttl_seconds = 60
 context_size = 2048
 max_new_tokens = 256

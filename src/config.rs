@@ -5,7 +5,7 @@ use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_REPOSITORY: &str = "micrictor/gemma-3-270m-it-ft-bash-GGUF";
-pub const DEFAULT_MODEL_FILE: &str = "gemma-3-270m-it-ft-bash-Q4_K_M.gguf";
+pub const DEFAULT_MODEL_FILE: &str = "gemma-3-270m-it-ft-bash-Q8_0.gguf";
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
@@ -90,7 +90,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_select_published_q4_k_m() {
+    fn defaults_select_published_q8_0() {
         let config = Config::default();
         assert_eq!(config.repository, DEFAULT_REPOSITORY);
         assert_eq!(config.model_file, DEFAULT_MODEL_FILE);
