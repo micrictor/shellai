@@ -1,9 +1,11 @@
 mod cli;
 mod config;
 mod inference;
+mod metrics;
 mod protocol;
 mod server;
 mod transport;
+mod workflow;
 
 use anyhow::Result;
 use clap::Parser;
@@ -24,17 +26,13 @@ fn run() -> Result<()> {
             prompt,
             context,
             no_start,
+            workflow,
         } => {
             let prompt = prompt.join(" ").trim().to_owned();
             anyhow::ensure!(!prompt.is_empty(), "a request is required");
-            let request = protocol::Request::Generate { prompt, context };
-            let response = transport::request(&request, !no_start)?;
-            if response.ok {
-                println!("{}", response.command.unwrap_or_default());
-                Ok(())
-            } else {
-                anyhow::bail!(response.error.unwrap_or_else(|| "request failed".into()))
-            }
+            let command = workflow::run(&prompt, context.as_deref(), workflow, !no_start)?;
+            println!("{command}");
+            Ok(())
         }
         cli::Command::Server {
             model_ttl,
@@ -83,6 +81,11 @@ fn run() -> Result<()> {
         }
         cli::Command::Plugin => {
             print!("{}", include_str!("../shellai.plugin.zsh"));
+            Ok(())
+        }
+        cli::Command::Metrics => {
+            println!("server: {}", metrics::server_path()?.display());
+            println!("client: {}", metrics::client_path()?.display());
             Ok(())
         }
     }

@@ -69,6 +69,26 @@ shellai ask -- "find files modified in the last 24 hours"
 shellai ask --context "git log" -- "only show commits from this week"
 ```
 
+### Guided workflow experiment
+
+The proposed help-grounded workflow is available explicitly:
+
+```console
+shellai ask --workflow guided -- "list every file in /etc containing root"
+```
+
+It performs up to four phases: asks the model for a `man -k` search (`Get-Help -Name` on
+Windows), executes that constrained search without a shell, asks the model to select one or two
+names that actually appeared in the results, then supplies the complete selected man/help pages
+for final generation. Invalid or empty discovery searches and invalid selections are retried up to
+three times. Local help processes have a 15-second timeout. Model text is never evaluated as a
+general shell command during this workflow.
+
+This mode is experimental and is not the default. Evaluation with the current command-specialized
+270M fine-tune found that it often solves the request directly instead of following the discovery
+or selection instruction. Use `--workflow zero-shot` (the default) for its trained behavior and
+compare the metric logs when iterating on a more instruction-capable model.
+
 ## Configuration
 
 Create a default config and print its path:
@@ -87,7 +107,7 @@ Windows. Available values are:
 repository = "micrictor/gemma-3-270m-it-ft-bash-GGUF"
 model_file = "gemma-3-270m-it-ft-bash-Q8_0.gguf"
 model_ttl_seconds = 60
-context_size = 2048
+context_size = 32768
 max_new_tokens = 256
 # threads = 8
 gpu_layers = 999
@@ -116,6 +136,24 @@ shellai stop
 shellai plugin                   # print the bundled plugin
 ```
 
+## Metrics
+
+Every inference appends a server-side JSONL record containing its workflow/stage IDs, prompt and
+completion token counts, total context use, configured context limit, inference duration, and RSS
+before/after/peak. Every client workflow appends a separate aggregate record with total token use,
+summed server inference time, peak server RSS, local discovery/help time, success, and end-to-end
+latency. Prompts, generated commands, search output, and help-page contents are not logged.
+
+Print the platform-specific paths with:
+
+```console
+shellai metrics
+```
+
+The files are normally `~/.cache/shellai/metrics/server.jsonl` and `client.jsonl` on Linux. A
+32K context is the configured ceiling; each inference allocates a smaller 512-token-aligned active
+context when its prompt does not need the full window.
+
 ## Build
 
 Requirements are Rust 1.89 or newer, CMake, Clang/libclang, a C/C++ compiler, and Git. The Rust
@@ -138,7 +176,7 @@ Continuous integration compiles the release targets requested by the project:
 
 ## Protocol and safety
 
-IPC messages are bounded, newline-delimited JSON. Unix sockets live inside a mode-0700 per-user
+IPC messages are bounded (8 MiB), newline-delimited JSON. Unix sockets live inside a mode-0700 per-user
 cache directory. Generated text is inserted into the editable command line and is not run by
 Shellai. As with any generated command, inspect it before execution.
 

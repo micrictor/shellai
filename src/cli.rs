@@ -1,4 +1,12 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum WorkflowMode {
+    /// Discover relevant commands and ground the answer in their full help pages.
+    Guided,
+    /// Send the request directly to the model in a single inference.
+    ZeroShot,
+}
 
 #[derive(Debug, Parser)]
 #[command(
@@ -23,6 +31,10 @@ pub enum Command {
         /// Fail instead of cold-starting the server.
         #[arg(long)]
         no_start: bool,
+
+        /// Inference workflow to use.
+        #[arg(long, value_enum, default_value_t = WorkflowMode::ZeroShot)]
+        workflow: WorkflowMode,
 
         /// Natural-language request.
         #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
@@ -57,4 +69,7 @@ pub enum Command {
 
     /// Print the bundled zsh plugin to stdout.
     Plugin,
+
+    /// Print the JSONL metric log locations.
+    Metrics,
 }

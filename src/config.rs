@@ -33,7 +33,9 @@ impl Default for Config {
             repository: DEFAULT_REPOSITORY.into(),
             model_file: DEFAULT_MODEL_FILE.into(),
             model_ttl_seconds: 60,
-            context_size: 2048,
+            // Gemma 3 advertises a 32K context. The guided workflow needs the
+            // room because its final stage includes complete help pages.
+            context_size: 32768,
             max_new_tokens: 256,
             threads: None,
             gpu_layers: 999,
@@ -103,6 +105,7 @@ mod tests {
         assert_eq!(config.repository, DEFAULT_REPOSITORY);
         assert_eq!(config.model_file, DEFAULT_MODEL_FILE);
         assert_eq!(config.model_ttl_seconds, 60);
+        assert_eq!(config.context_size, 32768);
         assert_eq!(config.top_k, 64);
         assert_eq!(config.top_p, 0.95);
         assert_eq!(config.seed, None);
