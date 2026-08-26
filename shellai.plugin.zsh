@@ -5,7 +5,7 @@ function _shellai_replace_buffer() {
   local context="$2"
   local result
 
-  zle -M 'shellai: generating command…'
+  zle -R 'shellai: generating command…'
   if [[ -n "$context" ]]; then
     result="$(command shellai ask --context "$context" -- "$request")"
   else
@@ -13,7 +13,7 @@ function _shellai_replace_buffer() {
   fi
   local exit_status=$?
   if (( exit_status != 0 )); then
-    zle -M 'shellai: generation failed (see error above)'
+    zle -R 'shellai: generation failed (see error above)'
     return $exit_status
   fi
 
@@ -27,7 +27,7 @@ function shellai-hotkey() {
   local requirement
 
   autoload -Uz read-from-minibuffer
-  read-from-minibuffer '🤖 shellai: '
+  read-from-minibuffer '🐢 shellai: '
   requirement="$REPLY"
   REPLY=''
   [[ -z "$requirement" ]] && return 0
@@ -39,7 +39,7 @@ function shellai-accept-line() {
     local request="${BUFFER#ai,}"
     request="${request#"${request%%[![:space:]]*}"}"
     if [[ -z "$request" ]]; then
-      zle -M 'usage: ai, <request>'
+      zle -R 'usage: ai, <request>'
       return 1
     fi
     _shellai_replace_buffer "$request" ''
