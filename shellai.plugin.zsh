@@ -25,11 +25,37 @@ function _shellai_replace_buffer() {
 function shellai-hotkey() {
   local original="$BUFFER"
   local requirement
+  local history_file="${SHELLAI_HISTORY_FILE:-${XDG_STATE_HOME:-$HOME/.local/state}/shellai/history}"
+  local history_directory="${history_file:h}"
+  local history_size="${SHELLAI_HISTORY_SIZE:-1000}"
+  local -i read_status=0
+
+  setopt localoptions extendedglob hist_ignore_all_dups
+  [[ "$history_size" == <1-> ]] || history_size=1000
+
+  if ! command mkdir -p -m 700 "$history_directory" 2>/dev/null; then
+    zle -R 'shellai: could not create the history directory'
+    return 1
+  fi
+
+  if ! fc -p -a "$history_file" "$history_size" "$history_size"; then
+    zle -R 'shellai: could not load prompt history'
+    return 1
+  fi
 
   autoload -Uz read-from-minibuffer
   read-from-minibuffer '🐢 shellai: '
+  read_status=$?
   requirement="$REPLY"
   REPLY=''
+
+  if (( read_status == 0 )) && [[ -n "$requirement" ]]; then
+    print -s -- "$requirement"
+  fi
+  fc -P
+  command chmod 600 "$history_file" 2>/dev/null
+
+  (( read_status != 0 )) && return $read_status
   [[ -z "$requirement" ]] && return 0
   _shellai_replace_buffer "$requirement" "$original"
 }

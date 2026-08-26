@@ -62,6 +62,17 @@ export SHELLAI_HOTKEY='^G'
 source /path/to/shellai.plugin.zsh
 ```
 
+The minibuffer has its own persistent history: use the normal ZLE bindings such as Up/Down and
+`Ctrl-R` to recall or search earlier shellai requests without adding them to ordinary command
+history. It keeps 1,000 entries by default in
+`${XDG_STATE_HOME:-$HOME/.local/state}/shellai/history`. Both are configurable before sourcing the
+plugin:
+
+```zsh
+export SHELLAI_HISTORY_FILE="$HOME/.shellai_history"
+export SHELLAI_HISTORY_SIZE=2000
+```
+
 The native client is also usable directly:
 
 ```console
