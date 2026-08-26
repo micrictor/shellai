@@ -11,10 +11,10 @@ function _shellai_replace_buffer() {
   else
     result="$(command shellai ask -- "$request")"
   fi
-  local status=$?
-  if (( status != 0 )); then
+  local exit_status=$?
+  if (( exit_status != 0 )); then
     zle -M 'shellai: generation failed (see error above)'
-    return $status
+    return $exit_status
   fi
 
   BUFFER="$result"
