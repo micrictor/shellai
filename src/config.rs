@@ -19,6 +19,11 @@ pub struct Config {
     pub max_new_tokens: u32,
     pub threads: Option<i32>,
     pub gpu_layers: u32,
+    /// Transformers-compatible sampling controls from generation_config.json.
+    pub top_k: i32,
+    pub top_p: f32,
+    /// None requests a fresh random seed from llama.cpp for each sampler.
+    pub seed: Option<u32>,
 }
 
 impl Default for Config {
@@ -32,6 +37,9 @@ impl Default for Config {
             max_new_tokens: 256,
             threads: None,
             gpu_layers: 999,
+            top_k: 64,
+            top_p: 0.95,
+            seed: None,
         }
     }
 }
@@ -95,5 +103,8 @@ mod tests {
         assert_eq!(config.repository, DEFAULT_REPOSITORY);
         assert_eq!(config.model_file, DEFAULT_MODEL_FILE);
         assert_eq!(config.model_ttl_seconds, 60);
+        assert_eq!(config.top_k, 64);
+        assert_eq!(config.top_p, 0.95);
+        assert_eq!(config.seed, None);
     }
 }

@@ -91,7 +91,14 @@ context_size = 2048
 max_new_tokens = 256
 # threads = 8
 gpu_layers = 999
+top_k = 64
+top_p = 0.95
+# seed = 42  # Uncomment for reproducible output.
 ```
+
+The sampling defaults mirror the fine-tuned model's Transformers `generation_config.json`:
+`do_sample = true`, `top_k = 64`, and `top_p = 0.95`. Consequently, exact commands can vary
+between requests. Set `seed` when deterministic output is more important than fresh sampling.
 
 `SHELLAI_MODEL` overrides `model_path`, and `SHELLAI_MODEL_TTL` overrides the TTL. A TTL of `0`
 unloads immediately after each request. Restart the server after changing configuration:

@@ -141,7 +141,17 @@ fn generate_command(
         .decode(&mut batch)
         .context("failed to evaluate the prompt")?;
 
-    let mut sampler = LlamaSampler::greedy();
+    anyhow::ensure!(config.top_k > 0, "top_k must be greater than zero");
+    anyhow::ensure!(
+        config.top_p > 0.0 && config.top_p <= 1.0,
+        "top_p must be greater than zero and at most one"
+    );
+    let mut sampler = LlamaSampler::chain_simple([
+        LlamaSampler::top_k(config.top_k),
+        LlamaSampler::top_p(config.top_p, 1),
+        // LLAMA_DEFAULT_SEED asks llama.cpp to select a random seed.
+        LlamaSampler::dist(config.seed.unwrap_or(u32::MAX)),
+    ]);
     let mut decoder = encoding_rs::UTF_8.new_decoder();
     let mut output = String::new();
     let mut position = batch.n_tokens();
