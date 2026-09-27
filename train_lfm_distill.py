@@ -18,6 +18,7 @@ import torch.nn.functional as F
 import transformers
 from datasets import DatasetDict, load_dataset
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
@@ -272,7 +273,14 @@ def validate(student, teacher, loader, device, args):
     student.eval()
     teacher.eval()
     totals = np.zeros(4, dtype=np.float64)
-    for batch in loader:
+    progress = tqdm(
+        loader,
+        desc="validation",
+        unit="batch",
+        dynamic_ncols=True,
+        leave=False,
+    )
+    for batch in progress:
         batch = {key: value.to(device) for key, value in batch.items()}
         with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
             loss, hard, soft, tokens = loss_components(
@@ -449,7 +457,13 @@ def main():
     )
     for epoch in range(state["epoch"], args.epochs):
         running = np.zeros(4, dtype=np.float64)
-        for batch_index, batch in enumerate(train_loader, start=1):
+        progress = tqdm(
+            train_loader,
+            desc=f"epoch {epoch + 1}/{args.epochs}",
+            unit="batch",
+            dynamic_ncols=True,
+        )
+        for batch_index, batch in enumerate(progress, start=1):
             batch = {
                 key: value.to(device, non_blocking=True) for key, value in batch.items()
             }
@@ -472,6 +486,13 @@ def main():
                 scheduler.step()
                 optimizer.zero_grad(set_to_none=True)
                 state["global_step"] += 1
+                progress.set_postfix(
+                    update=f"{state['global_step']}/{total_updates}",
+                    loss=f"{float(loss):.4f}",
+                    ce=f"{float(hard):.4f}",
+                    kl=f"{float(soft):.4f}",
+                    lr=f"{scheduler.get_last_lr()[0]:.2e}",
+                )
                 if state["global_step"] % args.logging_steps == 0:
                     denom = max(running[3], 1)
                     print(

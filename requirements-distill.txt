@@ -5,3 +5,4 @@ huggingface-hub>=0.34,<2
 numpy>=2,<3
 safetensors>=0.6,<1
 transformers>=5.0,<6
+tqdm>=4.67,<5
