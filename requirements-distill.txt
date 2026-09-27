@@ -1,0 +1,8 @@
+accelerate>=1.10,<2
+bitsandbytes>=0.47,<1
+datasets>=4.1,<5
+huggingface-hub>=0.34,<2
+numpy>=2,<3
+safetensors>=0.6,<1
+torch>=2.8,<3
+transformers>=4.56,<5

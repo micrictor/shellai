@@ -170,7 +170,38 @@ epoch; the custom trainer saves every epoch plus `best_model.pt` selected by
 validation loss. If CUDA runs out of memory, halve `--batch-size`; for FLAN-T5,
 increase `--gradient-accumulation-steps` to preserve the effective batch size.
 
-## 4. Evaluate
+## 4. Distill LFM2.5 into a Q4-deployable small model
+
+Open [`lfm_logit_distillation_colab.ipynb`](lfm_logit_distillation_colab.ipynb)
+in an A100 Colab runtime. It runs a small end-to-end smoke test, then distills
+`LiquidAI/LFM2.5-2.6B` into the transformer body of `LiquidAI/LFM2-350M` and
+evaluates the result after NF4/Q4 loading.
+
+[Open the distillation notebook in Colab](https://colab.research.google.com/github/micrictor/shellai/blob/training/lfm_logit_distillation_colab.ipynb)
+
+The two source models do not use the same tokenizer: the student has 65,536
+tokens and the teacher has 128,000, with different IDs. The run first remaps
+shared embedding and output rows by token string and expands the student to the
+teacher vocabulary. This makes full-vocabulary KL mathematically valid, but it
+also makes the final checkpoint roughly 480M parameters because the original
+student has separate input and output matrices. Training uses full student
+weights; Q4 is applied at inference time so quantization does not freeze most
+of the parameters during learning.
+
+For a non-Colab run, install `requirements-distill.txt` and execute:
+
+```powershell
+python .\train_lfm_distill.py `
+  --output-dir checkpoints/lfm2-nl2bash-distilled `
+  --epochs 2 `
+  --batch-size 2 `
+  --gradient-accumulation-steps 8
+```
+
+The trainer writes a single resumable `checkpoint-last` and a clean `final`
+inference directory. Pass `--resume-from <output>/checkpoint-last` to resume.
+
+## 5. Evaluate
 
 After regenerating the dataset and training at least one model:
 
