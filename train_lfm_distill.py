@@ -15,9 +15,11 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn.functional as F
+import transformers
 from datasets import DatasetDict, load_dataset
 from torch.utils.data import DataLoader
 from transformers import (
+    AutoConfig,
     AutoModelForCausalLM,
     AutoTokenizer,
     get_cosine_schedule_with_warmup,
@@ -85,9 +87,18 @@ def build_token_map(source_tokenizer, target_tokenizer):
     return target_ids, source_ids
 
 
-def transplant_student_vocabulary(student, source_tokenizer, target_tokenizer):
+def transplant_student_vocabulary(
+    student, source_tokenizer, target_tokenizer, target_embedding_rows
+):
     """Resize and remap student embeddings/LM head to target tokenizer IDs."""
     parameters_before = sum(parameter.numel() for parameter in student.parameters())
+    source_embedding_rows = student.get_input_embeddings().num_embeddings
+    target_vocab = target_tokenizer.get_vocab()
+    # LFM2.5 defines 125,017 token IDs but reserves a 128,000-row model
+    # vocabulary. Exact logit KL requires every model output row, including
+    # reserved rows, so this size comes from AutoConfig rather than len(tokenizer).
+    if target_embedding_rows <= max(target_vocab.values()):
+        raise ValueError("Teacher config vocabulary does not cover tokenizer IDs")
     was_tied = (
         student.get_input_embeddings().weight.data_ptr()
         == student.get_output_embeddings().weight.data_ptr()
@@ -102,7 +113,7 @@ def transplant_student_vocabulary(student, source_tokenizer, target_tokenizer):
     )
     target_ids, source_ids = build_token_map(source_tokenizer, target_tokenizer)
 
-    student.resize_token_embeddings(len(target_tokenizer), mean_resizing=False)
+    student.resize_token_embeddings(target_embedding_rows, mean_resizing=False)
     new_input = student.get_input_embeddings().weight
     new_output_layer = student.get_output_embeddings()
     new_output = new_output_layer.weight
@@ -130,10 +141,12 @@ def transplant_student_vocabulary(student, source_tokenizer, target_tokenizer):
             setattr(student.generation_config, name, value)
 
     stats = {
-        "source_vocab_size": len(source_tokenizer),
-        "target_vocab_size": len(target_tokenizer),
+        "source_defined_tokens": len(source_tokenizer.get_vocab()),
+        "source_embedding_rows": source_embedding_rows,
+        "target_defined_tokens": len(target_vocab),
+        "target_embedding_rows": target_embedding_rows,
         "exactly_remapped_tokens": len(target_ids),
-        "newly_initialized_tokens": len(target_tokenizer) - len(target_ids),
+        "newly_initialized_rows": target_embedding_rows - len(target_ids),
         "input_output_embeddings_were_tied": was_tied,
         "parameters_before": parameters_before,
         "parameters_after": sum(parameter.numel() for parameter in student.parameters()),
@@ -295,6 +308,12 @@ def save_inference_model(path, student, tokenizer, transplant_stats, args):
 
 def main():
     args = parse_args()
+    transformers_major = int(transformers.__version__.split(".", 1)[0])
+    if transformers_major < 5:
+        raise RuntimeError(
+            "LFM2.5 requires transformers>=5.0. Restart the Colab runtime, "
+            "rerun the install cell, and confirm the printed version is 5.x."
+        )
     if not torch.cuda.is_available():
         raise RuntimeError("This run requires a CUDA GPU; select an A100 Colab runtime")
     if torch.cuda.get_device_capability()[0] < 8:
@@ -309,12 +328,13 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print("Loading tokenizers and the fp32 student...")
+    teacher_config = AutoConfig.from_pretrained(args.teacher_model)
     tokenizer = AutoTokenizer.from_pretrained(
         args.resume_from or args.teacher_model
     )
     if args.resume_from:
         student = AutoModelForCausalLM.from_pretrained(
-            args.resume_from, torch_dtype=torch.float32, low_cpu_mem_usage=True
+            args.resume_from, dtype=torch.float32, low_cpu_mem_usage=True
         )
         stats_path = Path(args.resume_from) / "vocabulary_transplant.json"
         if not stats_path.exists():
@@ -327,10 +347,13 @@ def main():
     else:
         source_tokenizer = AutoTokenizer.from_pretrained(args.student_model)
         student = AutoModelForCausalLM.from_pretrained(
-            args.student_model, torch_dtype=torch.float32, low_cpu_mem_usage=True
+            args.student_model, dtype=torch.float32, low_cpu_mem_usage=True
         )
         transplant_stats = transplant_student_vocabulary(
-            student, source_tokenizer, tokenizer
+            student,
+            source_tokenizer,
+            tokenizer,
+            teacher_config.vocab_size,
         )
         del source_tokenizer
     print(json.dumps(transplant_stats, indent=2))
@@ -346,7 +369,8 @@ def main():
     print("Loading frozen BF16 teacher...")
     teacher = AutoModelForCausalLM.from_pretrained(
         args.teacher_model,
-        torch_dtype=torch.bfloat16,
+        config=teacher_config,
+        dtype=torch.bfloat16,
         low_cpu_mem_usage=True,
     ).to(device)
     teacher.eval()
