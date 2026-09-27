@@ -22,7 +22,6 @@ from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
     AutoTokenizer,
-    get_cosine_schedule_with_warmup,
 )
 
 
@@ -71,6 +70,21 @@ def seed_everything(seed):
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
+
+
+def cosine_schedule_with_warmup(optimizer, warmup_steps, total_steps):
+    """Torch-native scheduler; avoids importing Transformers trainer/PEFT."""
+
+    def multiplier(step):
+        if step < warmup_steps:
+            return float(step) / float(max(1, warmup_steps))
+        progress = float(step - warmup_steps) / float(
+            max(1, total_steps - warmup_steps)
+        )
+        progress = min(max(progress, 0.0), 1.0)
+        return 0.5 * (1.0 + math.cos(math.pi * progress))
+
+    return torch.optim.lr_scheduler.LambdaLR(optimizer, multiplier)
 
 
 def build_token_map(source_tokenizer, target_tokenizer):
@@ -411,10 +425,10 @@ def main():
         weight_decay=args.weight_decay,
         fused=True,
     )
-    scheduler = get_cosine_schedule_with_warmup(
+    scheduler = cosine_schedule_with_warmup(
         optimizer,
-        num_warmup_steps=max(1, int(total_updates * args.warmup_ratio)),
-        num_training_steps=total_updates,
+        warmup_steps=max(1, int(total_updates * args.warmup_ratio)),
+        total_steps=total_updates,
     )
     state = {"epoch": 0, "global_step": 0, "micro_step": 0}
     if args.resume_from:

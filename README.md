@@ -177,6 +177,11 @@ in an A100 Colab runtime. It runs a small end-to-end smoke test, then distills
 `LiquidAI/LFM2.5-2.6B` into the transformer body of `LiquidAI/LFM2-350M` and
 evaluates the result after NF4/Q4 loading.
 
+Run the environment cell before importing Transformers. It removes Colab's
+unused PEFT and torchvision installations because stale versions can conflict
+with the Transformers 5 text-only stack. If the runtime previously imported
+any of them, restart the session once and rerun the notebook from the top.
+
 [Open the distillation notebook in Colab](https://colab.research.google.com/github/micrictor/shellai/blob/training/lfm_logit_distillation_colab.ipynb)
 
 The two source models do not use the same tokenizer: the student has 65,536
