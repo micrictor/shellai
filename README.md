@@ -181,6 +181,9 @@ Run the environment cell before importing Transformers. It removes Colab's
 unused PEFT and torchvision installations because stale versions can conflict
 with the Transformers 5 text-only stack. If the runtime previously imported
 any of them, restart the session once and rerun the notebook from the top.
+The install deliberately leaves Colab's preloaded NumPy and PyTorch versions
+untouched; replacing either package in a live kernel can produce mixed-version
+imports that only fail later during evaluation.
 
 [Open the distillation notebook in Colab](https://colab.research.google.com/github/micrictor/shellai/blob/training/lfm_logit_distillation_colab.ipynb)
 
