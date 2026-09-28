@@ -209,6 +209,14 @@ python .\train_lfm_distill.py `
 The trainer writes a single resumable `checkpoint-last` and a clean `final`
 inference directory. Pass `--resume-from <output>/checkpoint-last` to resume.
 
+If training completed on Drive but Hub upload did not, open
+[`upload_lfm_checkpoint_to_hub_colab.ipynb`](upload_lfm_checkpoint_to_hub_colab.ipynb).
+It stages inference-only files, installs a ShellAI-compatible chat template,
+validates the checkpoint, uploads it to a private Hugging Face repository by
+default, and performs a fresh Q4 reload from the Hub.
+
+[Open the checkpoint upload notebook in Colab](https://colab.research.google.com/github/micrictor/shellai/blob/training/upload_lfm_checkpoint_to_hub_colab.ipynb)
+
 ## 5. Evaluate
 
 After regenerating the dataset and training at least one model:
