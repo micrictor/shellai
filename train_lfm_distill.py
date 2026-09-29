@@ -1,4 +1,4 @@
-"""Logit-distill LFM2-350M from LFM2.5-2.6B for NL-to-Bash.
+"""Logit-distill LFM2-350M from Qwen3.8-27B for NL-to-Bash.
 
 The two checkpoints do not share a vocabulary.  This script first transplants
 the student's learned input/output rows into the teacher tokenizer by matching
@@ -10,6 +10,7 @@ import argparse
 import json
 import math
 import random
+from collections.abc import Mapping
 from pathlib import Path
 
 import numpy as np
@@ -23,6 +24,7 @@ from transformers import (
     AutoConfig,
     AutoModelForCausalLM,
     AutoTokenizer,
+    BitsAndBytesConfig,
 )
 
 
@@ -31,17 +33,32 @@ SYSTEM_PROMPT = (
     "Return only the command, with no Markdown, explanation, or alternatives."
 )
 
+# A deliberately small text-only Qwen template. It normalizes ShellAI's
+# existing messages to the exact non-thinking prompt used for distillation.
+SHELLAI_CHAT_TEMPLATE = r'''{%- set shellai_system = "You translate natural-language requests into exactly one Bash command. Return only the command, with no Markdown, explanation, or alternatives." -%}
+{{- "<|im_start|>system\n" + shellai_system + "<|im_end|>\n" }}
+{%- for message in messages %}
+{%- if message["role"] == "user" %}
+{{- "<|im_start|>user\n" + (message["content"] | replace("Generate single Bash command: ", "Generate one Bash command: ")) + "<|im_end|>\n" }}
+{%- elif message["role"] == "assistant" %}
+{{- "<|im_start|>assistant\n<think>\n\n</think>\n\n" + message["content"] + "<|im_end|>\n" }}
+{%- endif %}
+{%- endfor %}
+{%- if add_generation_prompt %}
+{{- "<|im_start|>assistant\n<think>\n\n</think>\n\n" }}
+{%- endif %}'''
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--student-model", default="LiquidAI/LFM2-350M")
-    parser.add_argument("--teacher-model", default="LiquidAI/LFM2.5-2.6B")
+    parser.add_argument("--teacher-model", default="Qwen/Qwen3.8-27B")
     parser.add_argument("--dataset", default="westenfelder/NL2SH-ALFA")
     parser.add_argument("--dataset-config", default="train")
-    parser.add_argument("--output-dir", default="checkpoints/lfm2-nl2bash-distilled")
+    parser.add_argument("--output-dir", default="checkpoints/lfm2-qwen38-nl2bash-distilled")
     parser.add_argument("--epochs", type=int, default=2)
-    parser.add_argument("--batch-size", type=int, default=2)
-    parser.add_argument("--gradient-accumulation-steps", type=int, default=8)
+    parser.add_argument("--batch-size", type=int, default=1)
+    parser.add_argument("--gradient-accumulation-steps", type=int, default=16)
     parser.add_argument("--learning-rate", type=float, default=2e-5)
     parser.add_argument("--weight-decay", type=float, default=0.1)
     parser.add_argument("--warmup-ratio", type=float, default=0.05)
@@ -60,6 +77,12 @@ def parse_args():
     parser.add_argument("--logging-steps", type=int, default=10)
     parser.add_argument("--save-every-epoch", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--gradient-checkpointing", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--teacher-load-in-4bit",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Load the frozen 27B teacher in NF4 so it fits beside the student on a 40GB A100.",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--resume-from", default=None)
     parser.add_argument("--push-to-hub", default=None, metavar="REPO_ID")
@@ -71,6 +94,11 @@ def seed_everything(seed):
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
+
+
+def causal_lm_config(config):
+    """Return the text config for either a text-only or nested VLM checkpoint."""
+    return getattr(config, "text_config", config)
 
 
 def cosine_schedule_with_warmup(optimizer, warmup_steps, total_steps):
@@ -109,9 +137,8 @@ def transplant_student_vocabulary(
     parameters_before = sum(parameter.numel() for parameter in student.parameters())
     source_embedding_rows = student.get_input_embeddings().num_embeddings
     target_vocab = target_tokenizer.get_vocab()
-    # LFM2.5 defines 125,017 token IDs but reserves a 128,000-row model
-    # vocabulary. Exact logit KL requires every model output row, including
-    # reserved rows, so this size comes from AutoConfig rather than len(tokenizer).
+    # Exact logit KL requires every teacher output row, including reserved
+    # rows, so this size comes from AutoConfig rather than len(tokenizer).
     if target_embedding_rows <= max(target_vocab.values()):
         raise ValueError("Teacher config vocabulary does not cover tokenizer IDs")
     was_tied = (
@@ -169,14 +196,23 @@ def transplant_student_vocabulary(
     return stats
 
 
-def prompt_text(nl):
-    return (
-        "<|startoftext|><|im_start|>system\n"
-        f"{SYSTEM_PROMPT}<|im_end|>\n"
-        "<|im_start|>user\n"
-        f"Generate one Bash command: {str(nl).strip()}<|im_end|>\n"
-        "<|im_start|>assistant\n<think></think>\n"
+def prompt_ids(nl, tokenizer):
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": f"Generate one Bash command: {str(nl).strip()}",
+        },
+    ]
+    encoded = tokenizer.apply_chat_template(
+        messages,
+        tokenize=True,
+        add_generation_prompt=True,
+        enable_thinking=False,
     )
+    # Transformers 5 returns a BatchEncoding by default, while older releases
+    # returned the input-ID list directly.
+    return encoded["input_ids"] if isinstance(encoded, Mapping) else encoded
 
 
 def prepare_datasets(args, tokenizer):
@@ -199,10 +235,11 @@ def prepare_datasets(args, tokenizer):
         )
 
     def encode(row):
-        prompt_ids = tokenizer.encode(prompt_text(row["nl"]), add_special_tokens=False)
+        encoded_prompt = prompt_ids(row["nl"], tokenizer)
         answer_ids = tokenizer.encode(
-            str(row["bash"]).strip() + "<|im_end|>\n", add_special_tokens=False
-        )[: args.max_answer_tokens]
+            str(row["bash"]).strip(), add_special_tokens=False
+        )[: args.max_answer_tokens - 1]
+        answer_ids.append(tokenizer.eos_token_id)
         if len(answer_ids) < 2:
             raise ValueError("Encountered an empty Bash answer")
         prompt_budget = args.max_length - len(answer_ids)
@@ -211,9 +248,9 @@ def prepare_datasets(args, tokenizer):
             prompt_budget = 1
         # Preserve the user/assistant boundary if an unusually long request
         # must be truncated. Normal NL2SH examples fit without truncation.
-        prompt_ids = prompt_ids[-prompt_budget:]
-        input_ids = prompt_ids + answer_ids
-        labels = [-100] * len(prompt_ids) + answer_ids
+        encoded_prompt = encoded_prompt[-prompt_budget:]
+        input_ids = encoded_prompt + answer_ids
+        labels = [-100] * len(encoded_prompt) + answer_ids
         return {"input_ids": input_ids, "labels": labels}
 
     remove_columns = raw["train"].column_names
@@ -333,7 +370,7 @@ def main():
     transformers_major = int(transformers.__version__.split(".", 1)[0])
     if transformers_major < 5:
         raise RuntimeError(
-            "LFM2.5 requires transformers>=5.0. Restart the Colab runtime, "
+            "Qwen3.8 requires transformers>=5.0. Restart the Colab runtime, "
             "rerun the install cell, and confirm the printed version is 5.x."
         )
     if not torch.cuda.is_available():
@@ -342,6 +379,8 @@ def main():
         raise RuntimeError("BF16 requires an Ampere-or-newer CUDA GPU")
     if not 0 <= args.distill_weight <= 1:
         raise ValueError("--distill-weight must be between 0 and 1")
+    if args.max_answer_tokens < 2:
+        raise ValueError("--max-answer-tokens must be at least 2")
     seed_everything(args.seed)
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.set_float32_matmul_precision("high")
@@ -351,9 +390,11 @@ def main():
 
     print("Loading tokenizers and the fp32 student...")
     teacher_config = AutoConfig.from_pretrained(args.teacher_model)
+    teacher_text_config = causal_lm_config(teacher_config)
     tokenizer = AutoTokenizer.from_pretrained(
         args.resume_from or args.teacher_model
     )
+    tokenizer.chat_template = SHELLAI_CHAT_TEMPLATE
     if args.resume_from:
         student = AutoModelForCausalLM.from_pretrained(
             args.resume_from, dtype=torch.float32, low_cpu_mem_usage=True
@@ -375,7 +416,7 @@ def main():
             student,
             source_tokenizer,
             tokenizer,
-            teacher_config.vocab_size,
+            teacher_text_config.vocab_size,
         )
         del source_tokenizer
     print(json.dumps(transplant_stats, indent=2))
@@ -388,17 +429,29 @@ def main():
         student.gradient_checkpointing_enable()
     student.to(device)
 
-    print("Loading frozen BF16 teacher...")
+    teacher_quantization = None
+    if args.teacher_load_in_4bit:
+        teacher_quantization = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=torch.bfloat16,
+        )
+    print(
+        "Loading frozen teacher in "
+        + ("NF4..." if teacher_quantization is not None else "BF16...")
+    )
     teacher = AutoModelForCausalLM.from_pretrained(
         args.teacher_model,
-        config=teacher_config,
         dtype=torch.bfloat16,
         low_cpu_mem_usage=True,
-    ).to(device)
+        quantization_config=teacher_quantization,
+        device_map={"": 0},
+    )
     teacher.eval()
     teacher.requires_grad_(False)
     teacher.config.use_cache = False
-    if student.config.vocab_size != teacher.config.vocab_size:
+    if student.config.vocab_size != causal_lm_config(teacher.config).vocab_size:
         raise RuntimeError("Vocabulary transplant failed: output sizes still differ")
 
     encoded = prepare_datasets(args, tokenizer)

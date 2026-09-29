@@ -170,11 +170,11 @@ epoch; the custom trainer saves every epoch plus `best_model.pt` selected by
 validation loss. If CUDA runs out of memory, halve `--batch-size`; for FLAN-T5,
 increase `--gradient-accumulation-steps` to preserve the effective batch size.
 
-## 4. Distill LFM2.5 into a Q4-deployable small model
+## 4. Distill Qwen3.8-27B into a Q4-deployable small model
 
 Open [`lfm_logit_distillation_colab.ipynb`](lfm_logit_distillation_colab.ipynb)
 in an A100 Colab runtime. It runs a small end-to-end smoke test, then distills
-`LiquidAI/LFM2.5-2.6B` into the transformer body of `LiquidAI/LFM2-350M` and
+`Qwen/Qwen3.8-27B` into the transformer body of `LiquidAI/LFM2-350M` and
 evaluates the result after NF4/Q4 loading.
 
 Run the environment cell before importing Transformers. It removes Colab's
@@ -188,22 +188,22 @@ imports that only fail later during evaluation.
 [Open the distillation notebook in Colab](https://colab.research.google.com/github/micrictor/shellai/blob/training/lfm_logit_distillation_colab.ipynb)
 
 The two source models do not use the same tokenizer: the student has 65,536
-tokens and the teacher has 128,000, with different IDs. The run first remaps
+rows and the teacher has 248,320, with different IDs. The run first remaps
 shared embedding and output rows by token string and expands the student to the
-teacher vocabulary. This makes full-vocabulary KL mathematically valid, but it
-also makes the final checkpoint roughly 480M parameters because the original
-student has separate input and output matrices. Training uses full student
-weights; Q4 is applied at inference time so quantization does not freeze most
-of the parameters during learning.
+teacher vocabulary. This makes full-vocabulary KL mathematically valid and
+increases the tied-embedding student to roughly 537M parameters while leaving
+its transformer body unchanged. The frozen 27B teacher is loaded in NF4 to fit
+beside the full-weight student on a 40 GB A100. Q4 is applied to the student at
+inference time, not during training.
 
 For a non-Colab run, install `requirements-distill.txt` and execute:
 
 ```powershell
 python .\train_lfm_distill.py `
-  --output-dir checkpoints/lfm2-nl2bash-distilled `
+  --output-dir checkpoints/lfm2-qwen38-nl2bash-distilled `
   --epochs 2 `
-  --batch-size 2 `
-  --gradient-accumulation-steps 8
+  --batch-size 1 `
+  --gradient-accumulation-steps 16
 ```
 
 The trainer writes a single resumable `checkpoint-last` and a clean `final`
@@ -216,6 +216,10 @@ validates the checkpoint, uploads it to a private Hugging Face repository by
 default, and performs a fresh Q4 reload from the Hub.
 
 [Open the checkpoint upload notebook in Colab](https://colab.research.google.com/github/micrictor/shellai/blob/training/upload_lfm_checkpoint_to_hub_colab.ipynb)
+
+To build llama.cpp GGUF artifacts from the uploaded distilled checkpoint, validate their expanded
+vocabulary and chat template, compare HF/F16/Q8 output, and publish only validated files, use
+[`convert_lfm_distilled_to_gguf_colab.ipynb`](convert_lfm_distilled_to_gguf_colab.ipynb).
 
 ## 5. Evaluate
 
