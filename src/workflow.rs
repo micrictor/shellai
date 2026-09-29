@@ -12,7 +12,6 @@ use serde::Serialize;
 use crate::{
     cli::WorkflowMode,
     config::{Config, InferenceConfig},
-    inference::{COMMAND_CLOSE_TAG, COMMAND_OPEN_TAG},
     metrics,
     protocol::{InferenceMetrics, Request},
     transport,
@@ -102,14 +101,13 @@ impl WorkflowRun {
         context: Option<&str>,
         cold_start: bool,
     ) -> Result<String> {
-        let prompt = zero_shot_prompt(prompt, context);
         self.infer(
-            &prompt,
+            prompt,
             InferenceOptions {
-                context: None,
-                system_prompt: Some(zero_shot_system_prompt()),
-                assistant_prefix: Some(COMMAND_OPEN_TAG),
-                stop_after: Some(COMMAND_CLOSE_TAG),
+                context,
+                system_prompt: None,
+                assistant_prefix: None,
+                stop_after: None,
                 stage: "zero_shot",
                 cold_start,
             },
@@ -295,40 +293,6 @@ impl WorkflowRun {
             eprintln!("shellai: failed to record client metrics: {error:#}");
         }
     }
-}
-
-#[cfg(unix)]
-fn zero_shot_system_prompt() -> &'static str {
-    "You translate natural-language requests into a single Bash command. Respond only with the command between <shellai-command> and </shellai-command>. Do not use Markdown, explanations, or any text outside those tags. Preserve shell quoting and operators exactly."
-}
-
-#[cfg(windows)]
-fn zero_shot_system_prompt() -> &'static str {
-    "You translate natural-language requests into a single PowerShell command. Respond only with the command between <shellai-command> and </shellai-command>. Do not use Markdown, explanations, or any text outside those tags. Preserve PowerShell quoting and operators exactly."
-}
-
-#[cfg(unix)]
-fn zero_shot_shell_name() -> &'static str {
-    "Bash"
-}
-
-#[cfg(windows)]
-fn zero_shot_shell_name() -> &'static str {
-    "PowerShell"
-}
-
-fn zero_shot_prompt(request: &str, context: Option<&str>) -> String {
-    let context = context
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map_or_else(String::new, |value| {
-            format!("Existing command line to modify or replace:\n{value}\n\n")
-        });
-    format!(
-        "User request:\n{}\n\n{context}Return exactly one {} command in this form:\n<shellai-command>command</shellai-command>\nThe response is already prefixed with <shellai-command>; write the command next and then close the tag.",
-        request.trim(),
-        zero_shot_shell_name()
-    )
 }
 
 #[cfg(unix)]
@@ -705,13 +669,6 @@ fn duration_ms(duration: Duration) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn zero_shot_prompt_includes_existing_command_and_envelope() {
-        let prompt = zero_shot_prompt("only this week", Some("git log"));
-        assert!(prompt.contains("Existing command line to modify or replace:\ngit log"));
-        assert!(prompt.contains("<shellai-command>command</shellai-command>"));
-    }
 
     #[cfg(unix)]
     #[test]

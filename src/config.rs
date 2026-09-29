@@ -4,8 +4,8 @@ use anyhow::{Context, Result};
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
-pub const DEFAULT_REPOSITORY: &str = "LiquidAI/LFM2.5-1.2B-Instruct-GGUF";
-pub const DEFAULT_MODEL_FILE: &str = "LFM2.5-1.2B-Instruct-QAD-Q4_0.gguf";
+pub const DEFAULT_REPOSITORY: &str = "micrictor/LFM2-350M-Qwen38-ShellAI-GGUF";
+pub const DEFAULT_MODEL_FILE: &str = "LFM2-350M-Qwen38-ShellAI-Q8_0.gguf";
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default)]
@@ -63,8 +63,9 @@ impl Default for Config {
             gpu_layers: 999,
             top_k: 50,
             top_p: 0.95,
-            temperature: 0.1,
-            repeat_penalty: 1.05,
+            // The distilled checkpoint's generation config uses greedy decoding.
+            temperature: 0.0,
+            repeat_penalty: 1.0,
             seed: None,
         }
     }
@@ -180,7 +181,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_select_published_lfm_qad() {
+    fn defaults_select_published_shellai_distillation() {
         let config = Config::default();
         assert_eq!(config.repository, DEFAULT_REPOSITORY);
         assert_eq!(config.model_file, DEFAULT_MODEL_FILE);
@@ -188,8 +189,8 @@ mod tests {
         assert_eq!(config.context_size, 32768);
         assert_eq!(config.top_k, 50);
         assert_eq!(config.top_p, 0.95);
-        assert_eq!(config.temperature, 0.1);
-        assert_eq!(config.repeat_penalty, 1.05);
+        assert_eq!(config.temperature, 0.0);
+        assert_eq!(config.repeat_penalty, 1.0);
         assert_eq!(config.seed, None);
     }
 

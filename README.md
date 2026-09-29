@@ -5,8 +5,10 @@ entirely on the local machine. Version 0.2 is a native Rust rewrite: Python, PyT
 Frida, process injection, and the `ptrace_scope` change are no longer part of the runtime.
 
 The default model is
-[`LiquidAI/LFM2.5-1.2B-Instruct-GGUF`](https://huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct-GGUF),
-using its Quantization-Aware Distillation Q4_0 checkpoint.
+[`micrictor/shellai-lfm2-qwen38-nl2bash-distilled`](https://huggingface.co/micrictor/shellai-lfm2-qwen38-nl2bash-distilled),
+using the Q8_0 artifact from its
+[`micrictor/LFM2-350M-Qwen38-ShellAI-GGUF`](https://huggingface.co/micrictor/LFM2-350M-Qwen38-ShellAI-GGUF)
+companion repository.
 
 ## How it works
 
@@ -80,9 +82,8 @@ shellai ask -- "find files modified in the last 24 hours"
 shellai ask --context "git log" -- "only show commits from this week"
 ```
 
-Zero-shot inference is the default. It constrains the model response with an internal command
-envelope, stops generation at the closing marker, validates the complete envelope, and prints only
-the command within it. The envelope is never included in the command inserted into ZLE.
+Zero-shot inference is the default. It uses the same system instruction, user prefix, chat template,
+and greedy decoding contract used during distillation, then prints the generated command.
 
 ### Guided workflow experiment
 
@@ -103,11 +104,11 @@ This mode is experimental and is not the default. Current evaluations found that
 solve the request directly instead of following the discovery or selection instruction. Use
 `--workflow zero-shot` (the default) for normal command generation.
 
-The QAD checkpoint and Liquid AI sampling values are the defaults. An alternate GGUF can still be
-evaluated without changing the config:
+The command-specialized distilled checkpoint and its greedy generation setting are the defaults.
+An alternate GGUF can still be evaluated without changing the config:
 
 ```console
-SHELLAI_MODEL=/models/LFM2.5-1.2B-Instruct-Q8_0.gguf \
+SHELLAI_MODEL=/models/alternate-model.gguf \
 SHELLAI_TOP_K=50 SHELLAI_TEMPERATURE=0.1 SHELLAI_REPEAT_PENALTY=1.05 \
 shellai ask --workflow zero-shot -- "list every file in /etc containing root"
 ```
@@ -125,10 +126,10 @@ Windows. Available values are:
 
 ```toml
 # Set this to bypass Hugging Face entirely.
-# model_path = "/models/LFM2.5-1.2B-Instruct-QAD-Q4_0.gguf"
+# model_path = "/models/LFM2-350M-Qwen38-ShellAI-Q8_0.gguf"
 
-repository = "LiquidAI/LFM2.5-1.2B-Instruct-GGUF"
-model_file = "LFM2.5-1.2B-Instruct-QAD-Q4_0.gguf"
+repository = "micrictor/LFM2-350M-Qwen38-ShellAI-GGUF"
+model_file = "LFM2-350M-Qwen38-ShellAI-Q8_0.gguf"
 model_ttl_seconds = 60
 context_size = 32768
 max_new_tokens = 256
@@ -136,18 +137,19 @@ max_new_tokens = 256
 gpu_layers = 999
 top_k = 50
 top_p = 0.95
-temperature = 0.1
-repeat_penalty = 1.05
+temperature = 0.0
+repeat_penalty = 1.0
 # seed = 42  # Uncomment for reproducible output.
 ```
 
 An existing config remains authoritative and is not rewritten during upgrades. To adopt the new
-LFM2.5 QAD default, update its `repository` and `model_file` values as shown above (and remove an
-old `model_path` override), or move the config aside and run `shellai config --init` again.
+ShellAI distilled default, update its `repository` and `model_file` values as shown above (and
+remove an old `model_path` override), or move the config aside and run `shellai config --init`
+again.
 
-The sampling defaults use Liquid AI's recommended `top_k = 50`, `temperature = 0.1`, and
-`repeat_penalty = 1.05`; `top_p` remains `0.95`. Exact commands can still vary between requests.
-Set `seed` when deterministic output is more important than fresh sampling.
+The distilled checkpoint uses greedy generation by default (`temperature = 0.0`), matching its
+Transformers generation configuration. Set a positive temperature to sample instead; `seed` can
+then make sampled output reproducible.
 
 `SHELLAI_MODEL` overrides `model_path`, and `SHELLAI_MODEL_TTL` overrides the TTL. Sampler values
 can be overridden for model evaluation with `SHELLAI_TOP_K`, `SHELLAI_TEMPERATURE`, and
@@ -213,4 +215,4 @@ IPC messages are bounded (8 MiB), newline-delimited JSON. Unix sockets live insi
 cache directory. Generated text is inserted into the editable command line and is not run by
 Shellai. As with any generated command, inspect it before execution.
 
-Shellai is MIT licensed. The downloaded model remains subject to the Gemma license.
+Shellai is MIT licensed. The downloaded model remains subject to the LFM Open License v1.0.

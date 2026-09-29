@@ -12,9 +12,6 @@ use llama_cpp_2::{
 
 use crate::config::{Config, InferenceConfig};
 
-pub(crate) const COMMAND_OPEN_TAG: &str = "<shellai-command>";
-pub(crate) const COMMAND_CLOSE_TAG: &str = "</shellai-command>";
-
 pub struct ModelService {
     config: Config,
     backend: LlamaBackend,
@@ -124,7 +121,7 @@ fn generate_command(
     options: GenerationOptions<'_>,
 ) -> Result<Generation> {
     let system = options.system_prompt.unwrap_or(
-        "You are a helpful assistant that translates natural language to bash commands.",
+        "You translate natural-language requests into exactly one Bash command. Return only the command, with no Markdown, explanation, or alternatives.",
     );
     let user = if options.system_prompt.is_some() {
         request.trim().to_owned()
@@ -135,10 +132,10 @@ fn generate_command(
             .filter(|line| !line.is_empty())
         {
             Some(line) => format!(
-                "Current command line: {line}\nGenerate single Bash command: {}",
+                "Current command line: {line}\nGenerate one Bash command: {}",
                 request.trim()
             ),
-            None => format!("Generate single Bash command: {}", request.trim()),
+            None => format!("Generate one Bash command: {}", request.trim()),
         }
     };
     let messages = [
@@ -217,14 +214,23 @@ fn generate_command(
         config.repeat_penalty > 0.0,
         "repeat_penalty must be greater than zero"
     );
-    let mut sampler = LlamaSampler::chain_simple([
-        LlamaSampler::penalties(-1, config.repeat_penalty, 0.0, 0.0),
-        LlamaSampler::top_k(config.top_k),
-        LlamaSampler::top_p(config.top_p, 1),
-        LlamaSampler::temp(config.temperature),
-        // LLAMA_DEFAULT_SEED asks llama.cpp to select a random seed.
-        LlamaSampler::dist(config.seed.unwrap_or(u32::MAX)),
-    ]);
+    let mut sampler = if config.temperature == 0.0 {
+        // Match Transformers' do_sample=False rather than relying on the
+        // interaction between a zero temperature and a distribution sampler.
+        LlamaSampler::chain_simple([
+            LlamaSampler::penalties(-1, config.repeat_penalty, 0.0, 0.0),
+            LlamaSampler::greedy(),
+        ])
+    } else {
+        LlamaSampler::chain_simple([
+            LlamaSampler::penalties(-1, config.repeat_penalty, 0.0, 0.0),
+            LlamaSampler::top_k(config.top_k),
+            LlamaSampler::top_p(config.top_p, 1),
+            LlamaSampler::temp(config.temperature),
+            // LLAMA_DEFAULT_SEED asks llama.cpp to select a random seed.
+            LlamaSampler::dist(config.seed.unwrap_or(u32::MAX)),
+        ])
+    };
     for token in tokens.iter().copied() {
         sampler.accept(token);
     }
@@ -280,34 +286,13 @@ fn generate_command(
             .context("failed to generate a token")?;
     }
 
-    let command = if prefix == Some(COMMAND_OPEN_TAG) {
-        extract_command_envelope(&output)?
-    } else {
-        clean_generated_command(&output)
-    };
+    let command = clean_generated_command(&output);
     anyhow::ensure!(!command.is_empty(), "the model returned an empty command");
     Ok(Generation {
         text: command,
         prompt_tokens,
         completion_tokens,
     })
-}
-
-fn extract_command_envelope(output: &str) -> Result<String> {
-    let trimmed = output.trim();
-    let body = trimmed
-        .strip_prefix(COMMAND_OPEN_TAG)
-        .context("the model response did not start with the command envelope")?;
-    let (command, trailing) = body
-        .split_once(COMMAND_CLOSE_TAG)
-        .context("the model response did not close the command envelope")?;
-    anyhow::ensure!(
-        trailing.trim().is_empty(),
-        "the model returned content after the command envelope"
-    );
-    let command = clean_generated_command(command);
-    anyhow::ensure!(!command.is_empty(), "the model returned an empty command");
-    Ok(command)
 }
 
 pub(crate) fn clean_generated_command(output: &str) -> String {
@@ -341,22 +326,5 @@ mod tests {
     #[test]
     fn normalizes_smart_quotes() {
         assert_eq!(clean_generated_command("echo “hello”"), "echo \"hello\"");
-    }
-
-    #[test]
-    fn extracts_only_the_enveloped_command() {
-        assert_eq!(
-            extract_command_envelope(
-                "<shellai-command>find /etc -type f -exec grep -l root '{}' \\;</shellai-command>"
-            )
-            .unwrap(),
-            "find /etc -type f -exec grep -l root '{}' \\;"
-        );
-    }
-
-    #[test]
-    fn rejects_an_unclosed_command_envelope() {
-        let error = extract_command_envelope("<shellai-command>find /etc -type f").unwrap_err();
-        assert!(error.to_string().contains("did not close"));
     }
 }
