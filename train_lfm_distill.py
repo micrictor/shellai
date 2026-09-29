@@ -52,7 +52,11 @@ SHELLAI_CHAT_TEMPLATE = r'''{%- set shellai_system = "You translate natural-lang
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--student-model", default="LiquidAI/LFM2-350M")
-    parser.add_argument("--teacher-model", default="Qwen/Qwen3.8-27B")
+    parser.add_argument(
+        "--teacher-model",
+        default="unsloth/Qwen3.8-27B-unsloth-bnb-4bit",
+        help="Qwen3.8 teacher checkpoint; defaults to a pre-quantized NF4 artifact.",
+    )
     parser.add_argument("--dataset", default="westenfelder/NL2SH-ALFA")
     parser.add_argument("--dataset-config", default="train")
     parser.add_argument("--output-dir", default="checkpoints/lfm2-qwen38-nl2bash-distilled")
@@ -429,18 +433,22 @@ def main():
         student.gradient_checkpointing_enable()
     student.to(device)
 
+    embedded_quantization = getattr(teacher_config, "quantization_config", None)
     teacher_quantization = None
-    if args.teacher_load_in_4bit:
+    if args.teacher_load_in_4bit and not embedded_quantization:
         teacher_quantization = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
             bnb_4bit_use_double_quant=True,
             bnb_4bit_compute_dtype=torch.bfloat16,
         )
-    print(
-        "Loading frozen teacher in "
-        + ("NF4..." if teacher_quantization is not None else "BF16...")
-    )
+    if embedded_quantization:
+        teacher_format = "its embedded pre-quantized NF4 format"
+    elif teacher_quantization is not None:
+        teacher_format = "runtime-quantized NF4"
+    else:
+        teacher_format = "BF16"
+    print(f"Loading frozen teacher in {teacher_format}...", flush=True)
     teacher = AutoModelForCausalLM.from_pretrained(
         args.teacher_model,
         dtype=torch.bfloat16,

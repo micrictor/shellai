@@ -177,6 +177,12 @@ in an A100 Colab runtime. It runs a small end-to-end smoke test, then distills
 `Qwen/Qwen3.8-27B` into the transformer body of `LiquidAI/LFM2-350M` and
 evaluates the result after NF4/Q4 loading.
 
+The first run downloads the 22.3 GB pre-quantized NF4 teacher checkpoint
+`unsloth/Qwen3.8-27B-unsloth-bnb-4bit` before the smoke test. It does not fetch
+the 55.6 GB BF16 checkpoint. The notebook performs this as a separate step with
+file progress bars, and a partial download resumes when the cell is rerun in
+the same runtime.
+
 Run the environment cell before importing Transformers. It removes Colab's
 unused PEFT and torchvision installations because stale versions can conflict
 with the Transformers 5 text-only stack. If the runtime previously imported
