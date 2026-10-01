@@ -170,18 +170,19 @@ epoch; the custom trainer saves every epoch plus `best_model.pt` selected by
 validation loss. If CUDA runs out of memory, halve `--batch-size`; for FLAN-T5,
 increase `--gradient-accumulation-steps` to preserve the effective batch size.
 
-## 4. Distill Qwen3.8-27B into a Q4-deployable small model
+## 4. Distill Qwen3.8-27B into a Q4-deployable Qwen3-0.6B body
 
 Open [`lfm_logit_distillation_colab.ipynb`](lfm_logit_distillation_colab.ipynb)
-in an A100 Colab runtime. It runs a small end-to-end smoke test, then distills
-`Qwen/Qwen3.8-27B` into the transformer body of `LiquidAI/LFM2-350M` and
-evaluates the result after NF4/Q4 loading.
+in a G4 / RTX PRO 6000 Blackwell Colab runtime. It runs a small end-to-end
+smoke test, then distills the official `Qwen/Qwen3.8-27B-FP8` checkpoint into
+the transformer body of `Qwen/Qwen3-0.6B` and evaluates the result after
+NF4/Q4 loading.
 
-The first run downloads the 22.3 GB pre-quantized NF4 teacher checkpoint
-`unsloth/Qwen3.8-27B-unsloth-bnb-4bit` before the smoke test. It does not fetch
-the 55.6 GB BF16 checkpoint. The notebook performs this as a separate step with
+The first run downloads the roughly 28.8 GiB official FP8 teacher before the
+smoke test. The notebook performs this as a separate, revision-pinned step with
 file progress bars, and a partial download resumes when the cell is rerun in
-the same runtime.
+the same runtime. FP8 is preferred to NVFP4 on this 96 GB Blackwell GPU: it
+fits beside the trainable student and retains a higher-fidelity teacher.
 
 Run the environment cell before importing Transformers. It removes Colab's
 unused PEFT and torchvision installations because stale versions can conflict
@@ -193,27 +194,36 @@ imports that only fail later during evaluation.
 
 [Open the distillation notebook in Colab](https://colab.research.google.com/github/micrictor/shellai/blob/training/lfm_logit_distillation_colab.ipynb)
 
-The two source models do not use the same tokenizer: the student has 65,536
+The two source models do not use the same tokenizer: the student has 151,936
 rows and the teacher has 248,320, with different IDs. The run first remaps
 shared embedding and output rows by token string and expands the student to the
 teacher vocabulary. This makes full-vocabulary KL mathematically valid and
-increases the tied-embedding student to roughly 537M parameters while leaving
-its transformer body unchanged. The frozen 27B teacher is loaded in NF4 to fit
-beside the full-weight student on a 40 GB A100. Q4 is applied to the student at
-inference time, not during training.
+leaves the Qwen3-0.6B transformer body unchanged. The frozen teacher stays in
+its checkpoint's FP8 representation; Q4 is applied to the student at inference
+time, not during training.
+
+Before task training begins, the trainer saves a reusable `vocabulary-bridge`
+directory containing the expanded input/output initialization, exact source to
+target token-ID map, target tokenizer, shape metadata, and tokenizer hashes.
+For a later task using the same model pair, set `REUSE_BRIDGE` in the notebook
+to that directory. The loader validates both tokenizers and all relevant shapes
+before applying it.
 
 For a non-Colab run, install `requirements-distill.txt` and execute:
 
 ```powershell
 python .\train_lfm_distill.py `
-  --output-dir checkpoints/lfm2-qwen38-nl2bash-distilled `
+  --output-dir checkpoints/qwen3-0.6b-qwen38-nl2bash-distilled `
+  --vocabulary-bridge-dir checkpoints/qwen3-vocabulary-bridge `
   --epochs 2 `
   --batch-size 1 `
   --gradient-accumulation-steps 16
 ```
 
-The trainer writes a single resumable `checkpoint-last` and a clean `final`
-inference directory. Pass `--resume-from <output>/checkpoint-last` to resume.
+The trainer writes a single resumable `checkpoint-last`, a clean `final`
+inference directory, and the separate reusable bridge. Pass
+`--resume-from <output>/checkpoint-last` to resume, or
+`--reuse-vocabulary-bridge <bridge>` to initialize a new task run.
 
 If training completed on Drive but Hub upload did not, open
 [`upload_lfm_checkpoint_to_hub_colab.ipynb`](upload_lfm_checkpoint_to_hub_colab.ipynb).

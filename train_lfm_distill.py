@@ -1,4 +1,4 @@
-"""Logit-distill LFM2-350M from Qwen3.8-27B for NL-to-Bash.
+"""Logit-distill Qwen3-0.6B from Qwen3.8-27B for NL-to-Bash.
 
 The two checkpoints do not share a vocabulary.  This script first transplants
 the student's learned input/output rows into the teacher tokenizer by matching
@@ -7,8 +7,10 @@ KL distillation is well-defined.
 """
 
 import argparse
+import hashlib
 import json
 import math
+import os
 import random
 from collections.abc import Mapping
 from pathlib import Path
@@ -18,6 +20,7 @@ import torch
 import torch.nn.functional as F
 import transformers
 from datasets import DatasetDict, load_dataset
+from safetensors.torch import load_file, save_file
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from transformers import (
@@ -51,15 +54,15 @@ SHELLAI_CHAT_TEMPLATE = r'''{%- set shellai_system = "You translate natural-lang
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--student-model", default="LiquidAI/LFM2-350M")
+    parser.add_argument("--student-model", default="Qwen/Qwen3-0.6B")
     parser.add_argument(
         "--teacher-model",
-        default="unsloth/Qwen3.8-27B-unsloth-bnb-4bit",
-        help="Qwen3.8 teacher checkpoint; defaults to a pre-quantized NF4 artifact.",
+        default="Qwen/Qwen3.8-27B-FP8",
+        help="Qwen3.8 teacher checkpoint; official FP8 is the G4/Blackwell default.",
     )
     parser.add_argument("--dataset", default="westenfelder/NL2SH-ALFA")
     parser.add_argument("--dataset-config", default="train")
-    parser.add_argument("--output-dir", default="checkpoints/lfm2-qwen38-nl2bash-distilled")
+    parser.add_argument("--output-dir", default="checkpoints/qwen3-0.6b-qwen38-nl2bash-distilled")
     parser.add_argument("--epochs", type=int, default=2)
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--gradient-accumulation-steps", type=int, default=16)
@@ -84,8 +87,23 @@ def parse_args():
     parser.add_argument(
         "--teacher-load-in-4bit",
         action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Runtime-quantize an unquantized teacher to NF4; ignored for FP8/pre-quantized teachers.",
+    )
+    parser.add_argument(
+        "--vocabulary-bridge-dir",
+        default=None,
+        help="Where to save the reusable pre-training vocabulary/output bridge (default: OUTPUT/vocabulary-bridge).",
+    )
+    parser.add_argument(
+        "--reuse-vocabulary-bridge",
+        default=None,
+        help="Load a previously saved bridge instead of rebuilding expanded embeddings.",
+    )
+    parser.add_argument(
+        "--save-vocabulary-bridge",
+        action=argparse.BooleanOptionalAction,
         default=True,
-        help="Load the frozen 27B teacher in NF4 so it fits beside the student on a 40GB A100.",
     )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--resume-from", default=None)
@@ -134,6 +152,27 @@ def build_token_map(source_tokenizer, target_tokenizer):
     return target_ids, source_ids
 
 
+def tokenizer_fingerprint(tokenizer):
+    """Stable digest of token strings, IDs, and generation-critical special IDs."""
+    digest = hashlib.sha256()
+    for token, token_id in sorted(tokenizer.get_vocab().items(), key=lambda item: item[1]):
+        digest.update(str(token_id).encode("ascii"))
+        digest.update(b"\0")
+        digest.update(token.encode("utf-8", errors="surrogatepass"))
+        digest.update(b"\0")
+    for name in ("bos_token_id", "eos_token_id", "pad_token_id"):
+        digest.update(f"{name}={getattr(tokenizer, name)}\n".encode("ascii"))
+    return digest.hexdigest()
+
+
+def sync_special_tokens(student, target_tokenizer):
+    for name in ("bos_token_id", "eos_token_id", "pad_token_id"):
+        value = getattr(target_tokenizer, name)
+        setattr(student.config, name, value)
+        if getattr(student, "generation_config", None) is not None:
+            setattr(student.generation_config, name, value)
+
+
 def transplant_student_vocabulary(
     student, source_tokenizer, target_tokenizer, target_embedding_rows
 ):
@@ -178,13 +217,7 @@ def transplant_student_vocabulary(
                     0, dst, old_bias.index_select(0, src).to(new_output_layer.bias.device)
                 )
 
-    # The target tokenizer supplies every special-token ID used in training and
-    # generation.  Keep model and generation configs synchronized with it.
-    for name in ("bos_token_id", "eos_token_id", "pad_token_id"):
-        value = getattr(target_tokenizer, name)
-        setattr(student.config, name, value)
-        if getattr(student, "generation_config", None) is not None:
-            setattr(student.generation_config, name, value)
+    sync_special_tokens(student, target_tokenizer)
 
     stats = {
         "source_defined_tokens": len(source_tokenizer.get_vocab()),
@@ -197,6 +230,108 @@ def transplant_student_vocabulary(
         "parameters_before": parameters_before,
         "parameters_after": sum(parameter.numel() for parameter in student.parameters()),
     }
+    return stats, target_ids, source_ids
+
+
+def save_vocabulary_bridge(
+    path,
+    student,
+    source_tokenizer,
+    target_tokenizer,
+    target_ids,
+    source_ids,
+    stats,
+    args,
+):
+    """Save the task-independent expanded vocabulary and output initialization."""
+    path = Path(path)
+    path.mkdir(parents=True, exist_ok=True)
+    tied = (
+        student.get_input_embeddings().weight.data_ptr()
+        == student.get_output_embeddings().weight.data_ptr()
+    )
+    tensors = {
+        "input_embeddings": student.get_input_embeddings().weight.detach().cpu().contiguous(),
+        "target_token_ids": target_ids.contiguous(),
+        "source_token_ids": source_ids.contiguous(),
+    }
+    if not tied:
+        tensors["output_embeddings"] = (
+            student.get_output_embeddings().weight.detach().cpu().contiguous()
+        )
+    output_bias = getattr(student.get_output_embeddings(), "bias", None)
+    if output_bias is not None:
+        tensors["output_bias"] = output_bias.detach().cpu().contiguous()
+
+    bridge_file = path / "vocabulary_bridge.safetensors"
+    temporary_file = path / "vocabulary_bridge.incomplete.safetensors"
+    save_file(tensors, temporary_file)
+    os.replace(temporary_file, bridge_file)
+    target_tokenizer.save_pretrained(path / "target-tokenizer")
+    manifest = {
+        "format_version": 1,
+        "source_model": args.student_model,
+        "target_model": args.teacher_model,
+        "source_tokenizer_sha256": tokenizer_fingerprint(source_tokenizer),
+        "target_tokenizer_sha256": tokenizer_fingerprint(target_tokenizer),
+        "source_vocab_rows": stats["source_embedding_rows"],
+        "target_vocab_rows": stats["target_embedding_rows"],
+        "embedding_width": student.get_input_embeddings().embedding_dim,
+        "input_output_embeddings_tied": tied,
+        "tensor_file": bridge_file.name,
+        "stats": stats,
+    }
+    (path / "vocabulary_bridge.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    print(f"Saved reusable vocabulary bridge to {path}", flush=True)
+
+
+def load_vocabulary_bridge(path, student, source_tokenizer, target_tokenizer):
+    """Restore a task-independent vocabulary bridge into a fresh base student."""
+    path = Path(path)
+    manifest = json.loads((path / "vocabulary_bridge.json").read_text(encoding="utf-8"))
+    if manifest.get("format_version") != 1:
+        raise ValueError(f"Unsupported vocabulary bridge format: {manifest.get('format_version')}")
+    if tokenizer_fingerprint(source_tokenizer) != manifest["source_tokenizer_sha256"]:
+        raise ValueError("Source tokenizer does not match the saved vocabulary bridge")
+    if tokenizer_fingerprint(target_tokenizer) != manifest["target_tokenizer_sha256"]:
+        raise ValueError("Teacher tokenizer does not match the saved vocabulary bridge")
+    if student.get_input_embeddings().embedding_dim != manifest["embedding_width"]:
+        raise ValueError("Student embedding width does not match the saved vocabulary bridge")
+
+    student.resize_token_embeddings(manifest["target_vocab_rows"], mean_resizing=False)
+    tensors = load_file(path / manifest["tensor_file"], device="cpu")
+    expected_shape = (
+        manifest["target_vocab_rows"],
+        manifest["embedding_width"],
+    )
+    if tuple(tensors["input_embeddings"].shape) != expected_shape:
+        raise ValueError(
+            "Saved vocabulary bridge embedding shape does not match its manifest: "
+            f"{tuple(tensors['input_embeddings'].shape)} != {expected_shape}"
+        )
+    model_is_tied = (
+        student.get_input_embeddings().weight.data_ptr()
+        == student.get_output_embeddings().weight.data_ptr()
+    )
+    if model_is_tied != manifest["input_output_embeddings_tied"]:
+        raise ValueError("Student embedding tying does not match the saved vocabulary bridge")
+    with torch.no_grad():
+        student.get_input_embeddings().weight.copy_(
+            tensors["input_embeddings"].to(student.get_input_embeddings().weight.device)
+        )
+        if "output_embeddings" in tensors:
+            student.get_output_embeddings().weight.copy_(
+                tensors["output_embeddings"].to(student.get_output_embeddings().weight.device)
+            )
+        output_bias = getattr(student.get_output_embeddings(), "bias", None)
+        if output_bias is not None and "output_bias" in tensors:
+            output_bias.copy_(tensors["output_bias"].to(output_bias.device))
+    sync_special_tokens(student, target_tokenizer)
+    stats = dict(manifest["stats"])
+    stats["reused_from"] = str(path)
+    print(f"Loaded reusable vocabulary bridge from {path}", flush=True)
     return stats
 
 
@@ -378,7 +513,7 @@ def main():
             "rerun the install cell, and confirm the printed version is 5.x."
         )
     if not torch.cuda.is_available():
-        raise RuntimeError("This run requires a CUDA GPU; select an A100 Colab runtime")
+        raise RuntimeError("This run requires a CUDA GPU")
     if torch.cuda.get_device_capability()[0] < 8:
         raise RuntimeError("BF16 requires an Ampere-or-newer CUDA GPU")
     if not 0 <= args.distill_weight <= 1:
@@ -391,6 +526,7 @@ def main():
     device = torch.device("cuda")
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    bridge_dir = Path(args.vocabulary_bridge_dir or output_dir / "vocabulary-bridge")
 
     print("Loading tokenizers and the fp32 student...")
     teacher_config = AutoConfig.from_pretrained(args.teacher_model)
@@ -416,12 +552,31 @@ def main():
         student = AutoModelForCausalLM.from_pretrained(
             args.student_model, dtype=torch.float32, low_cpu_mem_usage=True
         )
-        transplant_stats = transplant_student_vocabulary(
-            student,
-            source_tokenizer,
-            tokenizer,
-            teacher_text_config.vocab_size,
-        )
+        if args.reuse_vocabulary_bridge:
+            transplant_stats = load_vocabulary_bridge(
+                args.reuse_vocabulary_bridge,
+                student,
+                source_tokenizer,
+                tokenizer,
+            )
+        else:
+            transplant_stats, target_ids, source_ids = transplant_student_vocabulary(
+                student,
+                source_tokenizer,
+                tokenizer,
+                teacher_text_config.vocab_size,
+            )
+            if args.save_vocabulary_bridge:
+                save_vocabulary_bridge(
+                    bridge_dir,
+                    student,
+                    source_tokenizer,
+                    tokenizer,
+                    target_ids,
+                    source_ids,
+                    transplant_stats,
+                    args,
+                )
         del source_tokenizer
     print(json.dumps(transplant_stats, indent=2))
     (output_dir / "vocabulary_transplant.json").write_text(
@@ -434,6 +589,11 @@ def main():
     student.to(device)
 
     embedded_quantization = getattr(teacher_config, "quantization_config", None)
+    embedded_quant_method = (
+        embedded_quantization.get("quant_method")
+        if isinstance(embedded_quantization, dict)
+        else getattr(embedded_quantization, "quant_method", None)
+    )
     teacher_quantization = None
     if args.teacher_load_in_4bit and not embedded_quantization:
         teacher_quantization = BitsAndBytesConfig(
@@ -443,7 +603,7 @@ def main():
             bnb_4bit_compute_dtype=torch.bfloat16,
         )
     if embedded_quantization:
-        teacher_format = "its embedded pre-quantized NF4 format"
+        teacher_format = f"its embedded {str(embedded_quant_method).upper()} format"
     elif teacher_quantization is not None:
         teacher_format = "runtime-quantized NF4"
     else:
