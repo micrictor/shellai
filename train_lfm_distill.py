@@ -14,6 +14,7 @@ import math
 import os
 import random
 from collections.abc import Mapping
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import numpy as np
@@ -129,6 +130,41 @@ def quantization_method(config):
     if isinstance(quantization, Mapping):
         return quantization.get("quant_method")
     return getattr(quantization, "quant_method", None)
+
+
+def validate_fp8_kernel_dependency(expected_quantization):
+    """Fail before model loading when the required FP8 kernel shim is absent."""
+    if not str(expected_quantization).lower().endswith("fp8"):
+        return
+    try:
+        kernels_version = version("kernels")
+    except PackageNotFoundError as error:
+        raise RuntimeError(
+            "The FP8 teacher requires kernels>=0.17.0,<0.18.0. Rerun the "
+            "notebook's dependency-install cell, then rerun this command."
+        ) from error
+    if not kernels_version.startswith("0.17."):
+        raise RuntimeError(
+            "The FP8 teacher requires kernels>=0.17.0,<0.18.0, but found "
+            f"kernels=={kernels_version}. Rerun the notebook's dependency-install "
+            "cell, then rerun this command."
+        )
+    try:
+        from transformers.integrations.finegrained_fp8 import (
+            load_finegrained_fp8_kernel,
+        )
+
+        load_finegrained_fp8_kernel()
+    except Exception as error:
+        raise RuntimeError(
+            "The finegrained-fp8 runtime kernel could not be loaded. Rerun the "
+            "notebook's dependency-install cell and inspect its kernels version "
+            "line before retrying."
+        ) from error
+    print(
+        f"FP8 kernel dependency: kernels=={kernels_version}, runtime kernel loaded",
+        flush=True,
+    )
 
 
 def sanitize_text_only_quantization_config(quantization):
@@ -652,6 +688,7 @@ def main():
         teacher_text_config.quantization_config = (
             sanitize_text_only_quantization_config(outer_quantization)
         )
+        validate_fp8_kernel_dependency(quantization_method(teacher_text_config))
     tokenizer = AutoTokenizer.from_pretrained(
         args.resume_from or args.teacher_model
     )
