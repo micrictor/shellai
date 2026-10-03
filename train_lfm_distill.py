@@ -123,6 +123,75 @@ def causal_lm_config(config):
     return getattr(config, "text_config", config)
 
 
+def quantization_method(config):
+    quantization = getattr(config, "quantization_config", None)
+    if isinstance(quantization, Mapping):
+        return quantization.get("quant_method")
+    return getattr(quantization, "quant_method", None)
+
+
+def validate_fp8_teacher_load(teacher, loading_info, expected_quantization):
+    """Reject a text-only load that silently discarded FP8 scale tensors."""
+    unexpected = loading_info.get("unexpected_keys", [])
+    ignored_scales = [key for key in unexpected if key.endswith("weight_scale_inv")]
+    scale_parameters = [
+        name
+        for name, _ in teacher.named_parameters()
+        if name.endswith("weight_scale_inv")
+    ]
+    print(
+        "Teacher FP8 preflight: "
+        f"quantization={expected_quantization}, "
+        f"loaded_scale_parameters={len(scale_parameters)}, "
+        f"ignored_scale_tensors={len(ignored_scales)}",
+        flush=True,
+    )
+    if ignored_scales:
+        preview = "\n".join(f"  - {key}" for key in ignored_scales[:20])
+        raise RuntimeError(
+            "The teacher loader ignored FP8 weight_scale_inv tensors. Its logits "
+            "would be invalid, so distillation has been stopped. First keys:\n"
+            f"{preview}"
+        )
+    if str(expected_quantization).lower().endswith("fp8") and not scale_parameters:
+        raise RuntimeError(
+            "The checkpoint declares FP8 quantization, but the loaded teacher has "
+            "no weight_scale_inv parameters. Refusing to distill from an unverified teacher."
+        )
+
+
+@torch.inference_mode()
+def validate_teacher_generation(teacher, tokenizer, device):
+    """Require a non-empty deterministic command before using teacher logits."""
+    ids = torch.tensor(
+        [prompt_ids("list every file modified today", tokenizer)],
+        dtype=torch.long,
+        device=device,
+    )
+    attention_mask = torch.ones_like(ids)
+    previous_cache = teacher.config.use_cache
+    teacher.config.use_cache = True
+    try:
+        generated = teacher.generate(
+            input_ids=ids,
+            attention_mask=attention_mask,
+            max_new_tokens=48,
+            do_sample=False,
+            eos_token_id=tokenizer.eos_token_id,
+            pad_token_id=tokenizer.pad_token_id,
+        )
+    finally:
+        teacher.config.use_cache = previous_cache
+    continuation = generated[0, ids.shape[1] :]
+    text = tokenizer.decode(continuation, skip_special_tokens=False)
+    command = text.split("<|im_end|>", 1)[0].strip()
+    if not command:
+        raise RuntimeError(
+            "The FP8 teacher produced an empty command during its generation preflight"
+        )
+    print(f"Teacher generation preflight: {command!r}", flush=True)
+
+
 def cosine_schedule_with_warmup(optimizer, warmup_steps, total_steps):
     """Torch-native scheduler; avoids importing Transformers trainer/PEFT."""
 
@@ -506,11 +575,13 @@ def save_inference_model(path, student, tokenizer, transplant_stats, args):
 
 def main():
     args = parse_args()
-    transformers_major = int(transformers.__version__.split(".", 1)[0])
-    if transformers_major < 5:
+    transformers_version = tuple(
+        int(part) for part in transformers.__version__.split("+", 1)[0].split(".")[:2]
+    )
+    if transformers_version < (5, 8):
         raise RuntimeError(
-            "Qwen3.8 requires transformers>=5.0. Restart the Colab runtime, "
-            "rerun the install cell, and confirm the printed version is 5.x."
+            "This Qwen3.8 FP8 loader requires transformers>=5.8. Restart the "
+            "Colab runtime, rerun the install cell, and confirm the printed version."
         )
     if not torch.cuda.is_available():
         raise RuntimeError("This run requires a CUDA GPU")
@@ -531,6 +602,12 @@ def main():
     print("Loading tokenizers and the fp32 student...")
     teacher_config = AutoConfig.from_pretrained(args.teacher_model)
     teacher_text_config = causal_lm_config(teacher_config)
+    # Qwen3.8 is published as a multimodal checkpoint with quantization_config
+    # on the outer config. AutoModelForCausalLM extracts the nested text config;
+    # carry FP8 metadata across explicitly or its scale tensors are ignored.
+    outer_quantization = getattr(teacher_config, "quantization_config", None)
+    if outer_quantization is not None:
+        teacher_text_config.quantization_config = outer_quantization
     tokenizer = AutoTokenizer.from_pretrained(
         args.resume_from or args.teacher_model
     )
@@ -588,12 +665,8 @@ def main():
         student.gradient_checkpointing_enable()
     student.to(device)
 
-    embedded_quantization = getattr(teacher_config, "quantization_config", None)
-    embedded_quant_method = (
-        embedded_quantization.get("quant_method")
-        if isinstance(embedded_quantization, dict)
-        else getattr(embedded_quantization, "quant_method", None)
-    )
+    embedded_quantization = getattr(teacher_text_config, "quantization_config", None)
+    embedded_quant_method = quantization_method(teacher_text_config)
     teacher_quantization = None
     if args.teacher_load_in_4bit and not embedded_quantization:
         teacher_quantization = BitsAndBytesConfig(
@@ -609,18 +682,30 @@ def main():
     else:
         teacher_format = "BF16"
     print(f"Loading frozen teacher in {teacher_format}...", flush=True)
-    teacher = AutoModelForCausalLM.from_pretrained(
-        args.teacher_model,
-        dtype=torch.bfloat16,
-        low_cpu_mem_usage=True,
-        quantization_config=teacher_quantization,
-        device_map={"": 0},
+    teacher_load_kwargs = {
+        "config": teacher_text_config,
+        "dtype": torch.bfloat16,
+        "low_cpu_mem_usage": True,
+        "device_map": {"": 0},
+        "output_loading_info": True,
+    }
+    if teacher_quantization is not None:
+        teacher_load_kwargs["quantization_config"] = teacher_quantization
+    teacher, teacher_loading_info = AutoModelForCausalLM.from_pretrained(
+        args.teacher_model, **teacher_load_kwargs
     )
     teacher.eval()
     teacher.requires_grad_(False)
     teacher.config.use_cache = False
+    if embedded_quantization:
+        validate_fp8_teacher_load(
+            teacher,
+            teacher_loading_info,
+            embedded_quant_method,
+        )
     if student.config.vocab_size != causal_lm_config(teacher.config).vocab_size:
         raise RuntimeError("Vocabulary transplant failed: output sizes still differ")
+    validate_teacher_generation(teacher, tokenizer, device)
 
     encoded = prepare_datasets(args, tokenizer)
     collator = DistillCollator(tokenizer.pad_token_id)
