@@ -7,6 +7,7 @@ KL distillation is well-defined.
 """
 
 import argparse
+import copy
 import hashlib
 import json
 import math
@@ -128,6 +129,47 @@ def quantization_method(config):
     if isinstance(quantization, Mapping):
         return quantization.get("quant_method")
     return getattr(quantization, "quant_method", None)
+
+
+def sanitize_text_only_quantization_config(quantization):
+    """Remove outer-model exclusions that shadow dense text projections.
+
+    The Qwen3.8 FP8 multimodal config contains a stale ``*.mlp.gate`` exclusion
+    for every dense text layer.  When that config is transplanted onto the
+    text-only model, Transformers treats ``mlp.gate`` as a parent-prefix match
+    for ``mlp.gate_proj``.  The projection then remains a plain Linear and its
+    FP8 scale is rejected as unexpected.  ``mlp.gate`` does not exist in the
+    dense Qwen3.5 text architecture, so it is safe and necessary to remove just
+    those 64 outer-model entries.
+    """
+    quantization = copy.deepcopy(quantization)
+    if isinstance(quantization, Mapping):
+        modules = quantization.get("modules_to_not_convert")
+    else:
+        modules = getattr(quantization, "modules_to_not_convert", None)
+    if not modules:
+        return quantization
+
+    filtered = [
+        module
+        for module in modules
+        if not (
+            str(module).startswith("model.language_model.layers.")
+            and str(module).endswith(".mlp.gate")
+        )
+    ]
+    removed = len(modules) - len(filtered)
+    if isinstance(quantization, Mapping):
+        quantization["modules_to_not_convert"] = filtered
+    else:
+        quantization.modules_to_not_convert = filtered
+    if removed:
+        print(
+            "Teacher FP8 config: removed "
+            f"{removed} stale dense-router exclusions that shadow gate_proj",
+            flush=True,
+        )
+    return quantization
 
 
 def validate_fp8_teacher_load(teacher, loading_info, expected_quantization):
@@ -607,7 +649,9 @@ def main():
     # carry FP8 metadata across explicitly or its scale tensors are ignored.
     outer_quantization = getattr(teacher_config, "quantization_config", None)
     if outer_quantization is not None:
-        teacher_text_config.quantization_config = outer_quantization
+        teacher_text_config.quantization_config = (
+            sanitize_text_only_quantization_config(outer_quantization)
+        )
     tokenizer = AutoTokenizer.from_pretrained(
         args.resume_from or args.teacher_model
     )
